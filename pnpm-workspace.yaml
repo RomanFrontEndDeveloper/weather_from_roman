@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+
+allowBuilds:
+  esbuild: true
+  sharp: false
+  unrs-resolver: false
+
+# packages — перелік пакетів, якими керуватиме workspace.
+# apps/* — усі безпосередні папки всередині apps, тобто apps/web і apps/server.
