@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import styles from "./page.module.css";
 
@@ -11,6 +11,15 @@ type Weather = {
   humidity: number;
   windSpeed: number;
   weatherCode: number;
+};
+
+type HistoryRecord = {
+  id: number;
+  city: string;
+  temperature: number | null;
+  humidity: number | null;
+  windSpeed: number | null;
+  searched_at: string;
 };
 
 function getWeatherDescription(code: number) {
@@ -55,6 +64,69 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const [history, setHistory] = useState<HistoryRecord[]>([]);
+  const [historyVisible, setHistoryVisible] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    setHistoryError("");
+
+    try {
+      const response = await fetch("http://localhost:5000/api/history");
+
+      if (!response.ok) {
+        throw new Error("Failed to load search history");
+      }
+
+      const data: HistoryRecord[] = await response.json();
+      setHistory(data);
+    } catch (error) {
+      setHistoryError(
+        error instanceof Error ? error.message : "Something went wrong",
+      );
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  async function handleDeleteHistory(id: number) {
+    setDeletingId(id);
+    setHistoryError("");
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/history/${id}`, {
+        method: "DELETE",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to delete history record");
+      }
+
+      setHistory((currentHistory) =>
+        currentHistory.filter((record) => record.id !== id),
+      );
+    } catch (error) {
+      setHistoryError(
+        error instanceof Error ? error.message : "Something went wrong",
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void loadHistory();
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [loadHistory]);
+
   async function handleSearch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -78,6 +150,7 @@ export default function Home() {
       }
 
       setWeather(data as Weather);
+      await loadHistory();
     } catch (error) {
       setError(error instanceof Error ? error.message : "Something went wrong");
     } finally {
@@ -200,6 +273,96 @@ export default function Home() {
             </div>
           </section>
         )}
+
+        <section className={styles.historySection}>
+          <div className={styles.historyHeader}>
+            <div>
+              <h2>Search history</h2>
+              <p>Your recent weather searches</p>
+            </div>
+
+            <button
+              className={styles.historyToggle}
+              type="button"
+              onClick={() => setHistoryVisible((visible) => !visible)}
+            >
+              {historyVisible ? "Hide history" : "Show history"}
+            </button>
+          </div>
+
+          {historyVisible && (
+            <div className={styles.historyContent}>
+              {historyLoading && <p>Loading history...</p>}
+
+              {historyError && (
+                <p className={styles.error} role="alert">
+                  {historyError}
+                </p>
+              )}
+
+              {!historyLoading && !historyError && history.length === 0 && (
+                <p>No search history yet.</p>
+              )}
+
+              {!historyLoading && history.length > 0 && (
+                <div className={styles.historyTableWrapper}>
+                  <table className={styles.historyTable}>
+                    <thead>
+                      <tr>
+                        <th>City</th>
+                        <th>Temperature</th>
+                        <th>Humidity</th>
+                        <th>Wind speed</th>
+                        <th>Search date</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {history.map((record) => (
+                        <tr key={record.id}>
+                          <td>{record.city}</td>
+                          <td>
+                            {record.temperature === null
+                              ? "—"
+                              : `${record.temperature} °C`}
+                          </td>
+                          <td>
+                            {record.humidity === null
+                              ? "—"
+                              : `${record.humidity}%`}
+                          </td>
+                          <td>
+                            {record.windSpeed === null
+                              ? "—"
+                              : `${record.windSpeed} km/h`}
+                          </td>
+                          <td>
+                            {new Date(record.searched_at).toLocaleString(
+                              "uk-UA",
+                            )}
+                          </td>
+                          <td>
+                            <button
+                              className={styles.deleteButton}
+                              type="button"
+                              disabled={deletingId === record.id}
+                              onClick={() => handleDeleteHistory(record.id)}
+                            >
+                              {deletingId === record.id
+                                ? "Deleting..."
+                                : "Delete"}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
 
         <footer className={styles.footer}>
           <span>WeatherPulse</span>
