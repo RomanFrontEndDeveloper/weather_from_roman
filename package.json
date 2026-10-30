@@ -1,10 +1,10 @@
-
 {
   "name": "weatherpulse",
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm --parallel --filter web --filter server dev"
+    "dev": "pnpm --parallel --filter web --filter server dev",
+    "build": "pnpm --filter web build && pnpm --filter server typecheck"
   },
   "packageManager": "pnpm@11.18.0"
 }
