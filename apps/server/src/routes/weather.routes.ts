@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getWeatherByCity } from "../services/weather.service.js";
-import { pool } from "../db.js";
+
+import { prisma } from "../prisma.js";
 
 const router = Router();
 
@@ -24,12 +25,14 @@ router.get("/weather", async (req, res) => {
   try {
     const weather = await getWeatherByCity(city.trim());
 
-    await pool.query(
-      `INSERT INTO weather_searches
-        (city, temperature, humidity, "windSpeed")
-       VALUES ($1, $2, $3, $4)`,
-      [weather.city, weather.temperature, weather.humidity, weather.windSpeed],
-    );
+    await prisma.weather_searches.create({
+      data: {
+        city: weather.city,
+        temperature: weather.temperature,
+        humidity: weather.humidity,
+        windSpeed: weather.windSpeed,
+      },
+    });
 
     res.status(200).json(weather);
   } catch (error) {
@@ -50,19 +53,20 @@ router.get("/weather", async (req, res) => {
 
 router.get("/history", async (_req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT
-        id,
-        city,
-        temperature,
-        humidity,
-        "windSpeed",
-        searched_at
-      FROM weather_searches
-      ORDER BY searched_at DESC
-    `);
+    const history = await prisma.weather_searches.findMany({
+      orderBy: {
+        searched_at: "desc",
+      },
+    });
 
-    res.status(200).json(result.rows);
+    res.status(200).json(
+      history.map((record) => ({
+        ...record,
+        temperature:
+          record.temperature === null ? null : Number(record.temperature),
+        windSpeed: record.windSpeed === null ? null : Number(record.windSpeed),
+      })),
+    );
   } catch (error) {
     console.error("Failed to fetch search history:", error);
 
@@ -83,12 +87,13 @@ router.delete("/history/:id", async (req, res) => {
   }
 
   try {
-    const result = await pool.query(
-      "DELETE FROM weather_searches WHERE id = $1 RETURNING id",
-      [id],
-    );
+    const deletedRecord = await prisma.weather_searches.deleteMany({
+      where: {
+        id,
+      },
+    });
 
-    if (result.rowCount === 0) {
+    if (deletedRecord.count === 0) {
       res.status(404).json({
         message: "History record not found",
       });
@@ -97,7 +102,7 @@ router.delete("/history/:id", async (req, res) => {
 
     res.status(200).json({
       message: "History record deleted",
-      id: result.rows[0].id,
+      id,
     });
   } catch (error) {
     console.error("Failed to delete history record:", error);
