@@ -25,7 +25,7 @@ router.get("/weather", async (req, res) => {
   try {
     const weather = await getWeatherByCity(city.trim());
 
-    await prisma.weather_searches.create({
+    await prisma.weatherSearch.create({
       data: {
         city: weather.city,
         temperature: weather.temperature,
@@ -53,7 +53,7 @@ router.get("/weather", async (req, res) => {
 
 router.get("/history", async (_req, res) => {
   try {
-    const history = await prisma.weather_searches.findMany({
+    const history = await prisma.weatherSearch.findMany({
       orderBy: {
         searched_at: "desc",
       },
@@ -87,7 +87,7 @@ router.delete("/history/:id", async (req, res) => {
   }
 
   try {
-    const deletedRecord = await prisma.weather_searches.deleteMany({
+    const deletedRecord = await prisma.weatherSearch.deleteMany({
       where: {
         id,
       },

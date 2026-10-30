@@ -7,13 +7,16 @@ datasource db {
   provider = "postgresql"
 }
 
-model weather_searches {
+model WeatherSearch {
   id          Int      @id @default(autoincrement())
   city        String
+  description String? 
   temperature Decimal? @db.Decimal(5, 2)
   searched_at DateTime @default(now()) @db.Timestamptz(6)
   humidity    Int?
   windSpeed   Decimal? @db.Decimal(6, 2)
+  
 
   @@index([searched_at(sort: Desc)], map: "idx_weather_searches_searched_at")
+  @@map("weather_searches")
 }

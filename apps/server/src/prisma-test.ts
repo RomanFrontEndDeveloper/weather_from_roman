@@ -2,7 +2,7 @@ import "dotenv/config";
 import { prisma } from "./prisma.js";
 
 try {
-  const history = await prisma.weather_searches.findMany({
+  const history = await prisma.weatherSearch.findMany({
     orderBy: {
       searched_at: "desc",
     },
