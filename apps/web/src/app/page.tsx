@@ -75,7 +75,7 @@ export default function Home() {
     setHistoryError("");
 
     try {
-      const response = await fetch("http://localhost:5000/api/history");
+      const response = await fetch("/api/history");
 
       if (!response.ok) {
         throw new Error("Failed to load search history");
@@ -97,7 +97,7 @@ export default function Home() {
     setHistoryError("");
 
     try {
-      const response = await fetch(`http://localhost:5000/api/history/${id}`, {
+      const response = await fetch(`/api/history/${id}`, {
         method: "DELETE",
       });
 
@@ -140,7 +140,7 @@ export default function Home() {
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/weather?city=${encodeURIComponent(trimmedCity)}`,
+        `/api/weather?city=${encodeURIComponent(trimmedCity)}`,
       );
 
       const data = await response.json();

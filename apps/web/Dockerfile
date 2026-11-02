@@ -19,11 +19,15 @@ RUN pnpm install --frozen-lockfile
 # 6. Копіюємо код проєкту
 COPY . .
 
-# 7. Збираємо frontend
+# 7. Передаємо адресу backend для Next.js
+ARG API_INTERNAL_URL
+ENV API_INTERNAL_URL=$API_INTERNAL_URL
+
+# 8. Збираємо frontend
 RUN pnpm --filter web build
 
-# 8. Порт Next.js
+# 9. Порт Next.js
 EXPOSE 3000
 
-# 9. Запускаємо production-сервер
+# 10. Запускаємо production-сервер
 CMD ["pnpm", "--filter", "web", "start"]

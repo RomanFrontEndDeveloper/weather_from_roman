@@ -291,22 +291,19 @@ WeatherPulse is a learning project designed to practice:
 ## License
 
 This project is intended for learning and educational purposes.
-
 ## Docker
 
-Для запуску WeatherPulse використовуємо Docker.
+Для запуску WeatherPulse використовуємо Docker і Docker Compose.
 
 **Використано:**
-
 - Docker Desktop
 - Node.js 22
 - PostgreSQL 17 (`postgres:17-alpine`)
 - Docker Volume `weatherpulse_data`
-- Docker images: `weatherpulse-backend`, `weatherpulse-frontend`
-- Контейнери: `weatherpulse-api`, `weatherpulse-web`, `weatherpulse-postgres`
+- Docker Compose (`compose.yaml`)
+- Docker images: `weather_from_roman-web`, `weather_from_roman-server`
 
 **Порти:**
-
 - Frontend: `3001 → 3000`
 - Backend: `5001 → 5000`
 - PostgreSQL: `5432 → 5432`
@@ -314,34 +311,41 @@ This project is intended for learning and educational purposes.
 **Основні команди:**
 
 ```powershell
-# Переглянути контейнери
-docker ps
-docker ps -a
+# Запуск усіх сервісів
+docker compose up -d --build
 
-# Переглянути images
+# Перегляд статусу
+docker compose ps
+
+# Перегляд логів
+docker compose logs
+docker compose logs web
+docker compose logs server
+docker compose logs db
+
+# Зупинка та повторний запуск
+docker compose stop
+docker compose start
+
+# Перезапуск
+docker compose restart
+
+# Зупинка та видалення контейнерів і мережі
+docker compose down
+
+# Перегляд images і volumes
 docker images
-
-# Перевірити PostgreSQL
-docker exec weatherpulse-postgres pg_isready
-
-# Зупинити та запустити PostgreSQL
-docker stop weatherpulse-postgres
-docker start weatherpulse-postgres
-
-# Переглянути логи
-docker logs weatherpulse-postgres
-docker logs weatherpulse-api
-docker logs weatherpulse-web
-
-# Інформація про контейнер
-docker inspect weatherpulse-postgres
+docker volume ls
 ```
 
 **Результат:**
+- Frontend Next.js працює в Docker.
+- Backend Express працює в Docker.
+- PostgreSQL працює в Docker.
+- Сервіси взаємодіють через спільну Docker-мережу.
+- Дані PostgreSQL зберігаються у Volume `weatherpulse_data`.
+- Роботу API та історії пошуку перевірено.
+- Перезапуск контейнерів не видаляє дані бази.
 
-- PostgreSQL працює в контейнері з постійним збереженням даних через Volume.
-- Backend Express зібраний і запущений у Docker.
-- Frontend Next.js зібраний і запущений у Docker.
-- Роботу frontend перевірено через `http://localhost:3001`.
+**Адреса застосунку:** http://localhost:3001
 
-**Наступний етап:** Docker Compose для спільного запуску frontend, backend і PostgreSQL.
