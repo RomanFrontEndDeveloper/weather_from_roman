@@ -1,7 +1,40 @@
+
 import {
   geocodingResponseSchema,
   forecastResponseSchema,
 } from "../schemas/weather.schema.js";
+
+// HTTP-статуси, для яких є сенс повторити запит.
+const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
+
+// Повторний запит із поступовим збільшенням паузи.
+async function fetchWithRetry(
+  url: URL,
+  maxAttempts = 3,
+): Promise<Response> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const response = await fetch(url);
+
+    if (
+      response.ok ||
+      !RETRYABLE_STATUS_CODES.includes(response.status) ||
+      attempt === maxAttempts
+    ) {
+      return response;
+    }
+
+    const delay = 1000 * 2 ** (attempt - 1);
+
+    console.warn(
+      `Weather API returned ${response.status}. ` +
+        `Retrying in ${delay}ms (${attempt}/${maxAttempts})`,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  throw new Error("FORECAST_API_ERROR");
+}
 
 export async function getWeatherByCity(city: string) {
   const geocodingUrl = new URL(
@@ -29,7 +62,9 @@ export async function getWeatherByCity(city: string) {
     throw new Error("CITY_NOT_FOUND");
   }
 
-  const forecastUrl = new URL("https://api.open-meteo.com/v1/forecast");
+  const forecastUrl = new URL(
+    "https://api.open-meteo.com/v1/forecast",
+  );
 
   forecastUrl.searchParams.set("latitude", String(location.latitude));
   forecastUrl.searchParams.set("longitude", String(location.longitude));
@@ -38,7 +73,7 @@ export async function getWeatherByCity(city: string) {
     "temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code",
   );
 
-  const forecastResponse = await fetch(forecastUrl);
+  const forecastResponse = await fetchWithRetry(forecastUrl);
 
   if (!forecastResponse.ok) {
     throw new Error("FORECAST_API_ERROR");
