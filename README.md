@@ -294,42 +294,54 @@ This project is intended for learning and educational purposes.
 
 ## Docker
 
-Для запуску та збереження PostgreSQL використовуємо Docker.
+Для запуску WeatherPulse використовуємо Docker.
 
 **Використано:**
 
 - Docker Desktop
+- Node.js 22
 - PostgreSQL 17 (`postgres:17-alpine`)
 - Docker Volume `weatherpulse_data`
-- Контейнер `weatherpulse-postgres`
-- Порт `5432`
+- Docker images: `weatherpulse-backend`, `weatherpulse-frontend`
+- Контейнери: `weatherpulse-api`, `weatherpulse-web`, `weatherpulse-postgres`
+
+**Порти:**
+
+- Frontend: `3001 → 3000`
+- Backend: `5001 → 5000`
+- PostgreSQL: `5432 → 5432`
 
 **Основні команди:**
 
-powershell
-
+```powershell
 # Переглянути контейнери
-
 docker ps
 docker ps -a
 
-# Перевірити PostgreSQL
+# Переглянути images
+docker images
 
+# Перевірити PostgreSQL
 docker exec weatherpulse-postgres pg_isready
 
-# Зупинити та запустити контейнер
-
+# Зупинити та запустити PostgreSQL
 docker stop weatherpulse-postgres
 docker start weatherpulse-postgres
 
 # Переглянути логи
-
 docker logs weatherpulse-postgres
+docker logs weatherpulse-api
+docker logs weatherpulse-web
 
-# Переглянути інформацію про контейнер
-
+# Інформація про контейнер
 docker inspect weatherpulse-postgres
+```
 
-# Переглянути Docker images
+**Результат:**
 
-docker images
+- PostgreSQL працює в контейнері з постійним збереженням даних через Volume.
+- Backend Express зібраний і запущений у Docker.
+- Frontend Next.js зібраний і запущений у Docker.
+- Роботу frontend перевірено через `http://localhost:3001`.
+
+**Наступний етап:** Docker Compose для спільного запуску frontend, backend і PostgreSQL.
