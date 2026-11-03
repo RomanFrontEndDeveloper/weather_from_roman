@@ -5,11 +5,30 @@ import {
 
 import redisClient from "../config/redis.js";
 
+import { weatherQueue } from "../queues/weather.queue.js";
+import type { WeatherHistoryJobData } from "../queues/weather.queue.js";
+
 // HTTP-статуси, для яких є сенс повторити запит.
 const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
 
 // Час життя кешу — 10 хвилин.
 const CACHE_TTL = 600;
+
+async function addWeatherHistoryJob(
+  weather: Omit<WeatherHistoryJobData, "searchedAt">,
+  searchedAt: string,
+): Promise<void> {
+  try {
+    await weatherQueue.add("save-weather-history", {
+      ...weather,
+      searchedAt,
+    });
+
+    console.log("Weather history job added successfully");
+  } catch (error) {
+    console.error("Failed to add weather history job:", error);
+  }
+}
 
 // Повторний запит із поступовим збільшенням паузи.
 async function fetchWithRetry(url: URL, maxAttempts = 3): Promise<Response> {
@@ -46,11 +65,17 @@ export async function getWeatherByCity(city: string) {
   if (redisClient.isReady) {
     try {
       const cachedWeather = await redisClient.get(cacheKey);
-
       if (cachedWeather) {
         console.log(`Cache HIT: ${cacheKey}`);
 
-        return JSON.parse(cachedWeather);
+        const weather = JSON.parse(cachedWeather) as Omit<
+          WeatherHistoryJobData,
+          "searchedAt"
+        >;
+
+        await addWeatherHistoryJob(weather, new Date().toISOString());
+
+        return weather;
       }
 
       console.log(`Cache MISS: ${cacheKey}`);
@@ -130,7 +155,9 @@ export async function getWeatherByCity(city: string) {
       console.warn("Redis SET failed:", error);
     }
   }
+  // 6. Додаємо задачу збереження історії.
+  await addWeatherHistoryJob(weather, new Date().toISOString());
 
-  // 6. Повертаємо погодні дані.
+  // 7. Повертаємо погодні дані.
   return weather;
 }
