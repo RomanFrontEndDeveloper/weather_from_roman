@@ -1,17 +1,18 @@
-
 import {
   geocodingResponseSchema,
   forecastResponseSchema,
 } from "../schemas/weather.schema.js";
 
+import redisClient from "../config/redis.js";
+
 // HTTP-статуси, для яких є сенс повторити запит.
 const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
 
+// Час життя кешу — 10 хвилин.
+const CACHE_TTL = 600;
+
 // Повторний запит із поступовим збільшенням паузи.
-async function fetchWithRetry(
-  url: URL,
-  maxAttempts = 3,
-): Promise<Response> {
+async function fetchWithRetry(url: URL, maxAttempts = 3): Promise<Response> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const response = await fetch(url);
 
@@ -37,6 +38,31 @@ async function fetchWithRetry(
 }
 
 export async function getWeatherByCity(city: string) {
+  // 1. Створюємо ключ кешу.
+  const cacheKey = `weather:${city.trim().toLowerCase()}`;
+
+  // 2. Перевіряємо Redis.
+  // Перевіряємо кеш, якщо Redis готовий.
+  if (redisClient.isReady) {
+    try {
+      const cachedWeather = await redisClient.get(cacheKey);
+
+      if (cachedWeather) {
+        console.log(`Cache HIT: ${cacheKey}`);
+
+        return JSON.parse(cachedWeather);
+      }
+
+      console.log(`Cache MISS: ${cacheKey}`);
+    } catch (error) {
+      console.warn("Redis GET failed. Continuing without cache:", error);
+    }
+  } else {
+    console.warn("Redis is unavailable. Skipping cache.");
+  }
+
+  // 3. Якщо кешу немає — звертаємося до Open-Meteo.
+
   const geocodingUrl = new URL(
     "https://geocoding-api.open-meteo.com/v1/search",
   );
@@ -62,9 +88,7 @@ export async function getWeatherByCity(city: string) {
     throw new Error("CITY_NOT_FOUND");
   }
 
-  const forecastUrl = new URL(
-    "https://api.open-meteo.com/v1/forecast",
-  );
+  const forecastUrl = new URL("https://api.open-meteo.com/v1/forecast");
 
   forecastUrl.searchParams.set("latitude", String(location.latitude));
   forecastUrl.searchParams.set("longitude", String(location.longitude));
@@ -83,7 +107,8 @@ export async function getWeatherByCity(city: string) {
     await forecastResponse.json(),
   );
 
-  return {
+  // 4. Формуємо результат.
+  const weather = {
     city: location.name,
     country: location.country,
     temperature: forecastData.current.temperature_2m,
@@ -91,4 +116,21 @@ export async function getWeatherByCity(city: string) {
     windSpeed: forecastData.current.wind_speed_10m,
     weatherCode: forecastData.current.weather_code,
   };
+
+  // 5. Зберігаємо результат у Redis на 10 хвилин.
+  // Зберігаємо погоду в кеші, якщо Redis доступний.
+  if (redisClient.isReady) {
+    try {
+      await redisClient.set(cacheKey, JSON.stringify(weather), {
+        EX: CACHE_TTL,
+      });
+
+      console.log(`Cache SET: ${cacheKey}`);
+    } catch (error) {
+      console.warn("Redis SET failed:", error);
+    }
+  }
+
+  // 6. Повертаємо погодні дані.
+  return weather;
 }

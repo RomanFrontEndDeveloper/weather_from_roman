@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import weatherRouter from "./routes/weather.routes.js";
+import { connectRedis } from "./config/redis.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
@@ -10,6 +11,14 @@ app.use(express.json());
 
 app.use("/api", weatherRouter);
 
-app.listen(PORT, () => {
-  console.log(`WeatherPulse API running at http://localhost:${PORT}`);
-});
+const startServer = () => {
+  connectRedis().catch((error) => {
+    console.warn("Redis unavailable. Starting without cache:", error);
+  });
+
+  app.listen(PORT, () => {
+    console.log(`WeatherPulse API running at http://localhost:${PORT}`);
+  });
+};
+
+startServer();

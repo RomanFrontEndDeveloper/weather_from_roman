@@ -291,11 +291,13 @@ WeatherPulse is a learning project designed to practice:
 ## License
 
 This project is intended for learning and educational purposes.
+
 ## Docker
 
 Для запуску WeatherPulse використовуємо Docker і Docker Compose.
 
 **Використано:**
+
 - Docker Desktop
 - Node.js 22
 - PostgreSQL 17 (`postgres:17-alpine`)
@@ -304,6 +306,7 @@ This project is intended for learning and educational purposes.
 - Docker images: `weather_from_roman-web`, `weather_from_roman-server`
 
 **Порти:**
+
 - Frontend: `3001 → 3000`
 - Backend: `5001 → 5000`
 - PostgreSQL: `5432 → 5432`
@@ -339,6 +342,7 @@ docker volume ls
 ```
 
 **Результат:**
+
 - Frontend Next.js працює в Docker.
 - Backend Express працює в Docker.
 - PostgreSQL працює в Docker.
@@ -349,3 +353,67 @@ docker volume ls
 
 **Адреса застосунку:** http://localhost:3001
 
+## Redis Caching
+
+WeatherPulse uses Redis as an in-memory cache to improve API response times and reduce unnecessary requests to the external Open-Meteo API.
+
+### Features
+
+- Redis integration with Node.js and Express.
+- Weather data caching.
+- Cache Hit and Cache Miss handling.
+- Configurable cache expiration (TTL).
+- Automatic cache expiration.
+- Graceful degradation when Redis is unavailable.
+
+### Cache Strategy
+
+1. The backend checks Redis for cached weather data.
+2. If cached data exists (Cache Hit), it is returned immediately.
+3. If cached data does not exist (Cache Miss), the backend requests weather data from Open-Meteo.
+4. The result is stored in Redis for 10 minutes.
+5. If Redis is unavailable, the backend continues fetching weather data directly from Open-Meteo.
+
+### Redis Configuration
+
+```env
+REDIS_URL=redis://redis:6379
+```
+
+For local development outside Docker:
+
+```env
+REDIS_URL=redis://127.0.0.1:6379
+```
+
+### Docker
+
+Redis runs as a separate Docker Compose service using the `redis:7-alpine` image.
+
+Start Redis:
+
+```bash
+docker compose up -d redis
+```
+
+Check Redis:
+
+```bash
+docker exec weatherpulse-redis redis-cli ping
+```
+
+Expected response:
+
+```text
+PONG
+```
+
+### Cache Configuration
+
+The cache expiration time is configured using `CACHE_TTL`.
+
+```typescript
+const CACHE_TTL = 600;
+```
+
+This means cached weather data expires after 10 minutes.
