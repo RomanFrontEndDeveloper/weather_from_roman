@@ -417,3 +417,81 @@ const CACHE_TTL = 600;
 ```
 
 This means cached weather data expires after 10 minutes.
+
+### Background Jobs — BullMQ
+
+WeatherPulse uses **BullMQ** and **Redis** to process weather search history asynchronously.
+
+Instead of saving every search directly during the HTTP request, the backend adds a job to the `weather-history` queue. A separate Worker processes the job and saves the search data to PostgreSQL using Prisma.
+
+**How it works:**
+
+1. The user searches for a city.
+2. The Express backend retrieves weather data from Open-Meteo or Redis cache.
+3. The backend adds a `save-weather-history` job to the BullMQ queue.
+4. Redis stores and manages the queued job.
+5. The Weather Worker retrieves the job.
+6. Prisma saves the weather search history in PostgreSQL.
+7. BullMQ marks the job as completed or failed.
+
+**Technologies:**
+
+- BullMQ — background job and queue management.
+- Redis — queue storage and job state management.
+- ioredis — Redis connection for BullMQ.
+- Prisma — database operations.
+- PostgreSQL — persistent weather search history.
+
+**Main components:**
+
+- `config/queue.redis.ts` — Redis connection for BullMQ.
+- `queues/weather.queue.ts` — weather history queue and job data types.
+- `workers/weather.worker.ts` — background job processor.
+- `worker.ts` — separate Worker entry point.
+
+**Development commands:**
+
+```bash
+# Start the Express backend
+pnpm --filter server dev
+
+# Start the background Worker
+pnpm --filter server dev:worker
+```
+
+The backend and Worker run as separate processes.
+
+The implementation supports asynchronous weather history storage for both Redis cache hits and cache misses.
+///////////////////////////////////
+
+### Automated Testing
+
+WeatherPulse uses **Vitest** for automated testing of backend functionality.
+
+#### Implemented tests
+
+- **Unit tests:** basic utility function testing.
+- **Weather service tests:**
+  - Successful weather data retrieval.
+  - Handling cities that cannot be found (`CITY_NOT_FOUND`).
+  - Handling Geocoding API errors.
+  - Handling Forecast API errors.
+- **Mocking:** external API requests, Redis and BullMQ dependencies are mocked to isolate the weather service during testing.
+
+#### Running tests
+
+Run all backend tests:
+
+```bash
+pnpm --filter server exec vitest run
+```
+
+#### Current test coverage
+
+- Utility function tests: 2
+- Weather service tests: 4
+- Total: 6 automated tests
+
+All 6 tests pass successfully.
+
+Additional integration and end-to-end tests are planned for subsequent stages of development.
