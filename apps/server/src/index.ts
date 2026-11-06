@@ -3,6 +3,8 @@ import cors from "cors";
 import weatherRouter from "./routes/weather.routes.js";
 import { connectRedis } from "./config/redis.js";
 
+import "./workers/weather.worker.js";
+
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
 

@@ -1,10 +1,11 @@
 import { Router } from "express";
-import { getWeatherByCity } from "../services/weather.service.js";
 
+import { getWeatherByCity } from "../services/weather.service.js";
 import { prisma } from "../prisma.js";
 
 const router = Router();
 
+// Перевірка доступності API.
 router.get("/health", (_req, res) => {
   res.status(200).json({
     status: "ok",
@@ -12,6 +13,7 @@ router.get("/health", (_req, res) => {
   });
 });
 
+// Отримання поточної погоди за назвою міста.
 router.get("/weather", async (req, res) => {
   const city = req.query.city;
 
@@ -24,15 +26,6 @@ router.get("/weather", async (req, res) => {
 
   try {
     const weather = await getWeatherByCity(city.trim());
-
-    await prisma.weatherSearch.create({
-      data: {
-        city: weather.city,
-        temperature: weather.temperature,
-        humidity: weather.humidity,
-        windSpeed: weather.windSpeed,
-      },
-    });
 
     res.status(200).json(weather);
   } catch (error) {
@@ -51,6 +44,7 @@ router.get("/weather", async (req, res) => {
   }
 });
 
+// Отримання історії пошуку погоди.
 router.get("/history", async (_req, res) => {
   try {
     const history = await prisma.weatherSearch.findMany({
@@ -59,14 +53,14 @@ router.get("/history", async (_req, res) => {
       },
     });
 
-    res.status(200).json(
-      history.map((record) => ({
-        ...record,
-        temperature:
-          record.temperature === null ? null : Number(record.temperature),
-        windSpeed: record.windSpeed === null ? null : Number(record.windSpeed),
-      })),
-    );
+    const formattedHistory = history.map((record) => ({
+      ...record,
+      temperature:
+        record.temperature === null ? null : Number(record.temperature),
+      windSpeed: record.windSpeed === null ? null : Number(record.windSpeed),
+    }));
+
+    res.status(200).json(formattedHistory);
   } catch (error) {
     console.error("Failed to fetch search history:", error);
 
@@ -76,6 +70,7 @@ router.get("/history", async (_req, res) => {
   }
 });
 
+// Видалення запису з історії пошуку.
 router.delete("/history/:id", async (req, res) => {
   const id = Number(req.params.id);
 

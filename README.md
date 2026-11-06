@@ -1,26 +1,85 @@
 # WeatherPulse 🌦️
 
-WeatherPulse is a full-stack weather application that allows users to search for cities, view current weather conditions, and work with weather search data.
+**WeatherPulse** is a full-stack weather application built with Next.js, React, TypeScript, Node.js, Express, PostgreSQL, Prisma, Redis and BullMQ.
 
-The project is built as a monorepo with a Next.js frontend and an Express backend. It uses the Open-Meteo API to retrieve weather data and PostgreSQL to store application data.
+The application allows users to search for cities, retrieve current weather conditions, view weather information and manage weather search history.
 
-The project is also focused on learning and implementing production-oriented backend technologies and development practices.
+Weather data is retrieved from the Open-Meteo API, validated with Zod, cached in Redis and stored asynchronously in PostgreSQL through BullMQ background jobs.
+
+The project is developed as a pnpm monorepo and focuses on modern full-stack architecture, backend engineering, database management, automated testing, containerization and production deployment.
+
+---
 
 ## Features
 
-- Search for a city by name.
-- Display the current temperature.
-- Display humidity and wind speed.
-- Show weather conditions with descriptions and icons.
-- Handle loading and error states.
-- Validate external API responses with Zod.
-- Use request timeouts for external API calls.
-- Responsive dark-themed user interface.
-- PostgreSQL database integration.
-- Weather search database model.
-- Prisma ORM integration.
+### Weather Application
+
+- Search for cities by name.
+- Retrieve current weather conditions.
+- Display temperature, humidity and wind speed.
+- Display weather conditions using weather codes and icons.
+- Responsive dark-themed interface.
+- Loading and error states.
+- Input validation and error handling.
+
+### Backend
+
+- REST API built with Express.
+- TypeScript-based backend architecture.
+- External API integration using Fetch API.
+- Zod validation for external API responses.
+- Retry mechanism for temporary external API failures.
+- HTTP error handling.
+- Separate API and background Worker processes.
+
+### Database
+
+- PostgreSQL integration.
+- Prisma ORM.
+- Prisma Client.
 - Database schema management.
-- Prisma migrations and Prisma Client setup.
+- Prisma migrations.
+- Weather search history.
+- Database queries and sorting.
+
+### Redis Caching
+
+- Redis integration.
+- Weather data caching.
+- Cache Hit and Cache Miss handling.
+- Configurable cache expiration.
+- 10-minute cache TTL.
+- Graceful degradation when Redis is unavailable.
+
+### Background Jobs
+
+- BullMQ job queue.
+- Redis-based job management.
+- Separate background Worker.
+- Asynchronous weather history storage.
+- Job completion and failure handling.
+- PostgreSQL integration through Prisma.
+
+### Automated Testing
+
+- Vitest.
+- Unit testing.
+- Mocking external API requests.
+- Mocking Redis and BullMQ dependencies.
+- Weather service testing.
+- Error handling tests.
+
+### Infrastructure
+
+- Docker.
+- Docker Compose.
+- PostgreSQL container.
+- Redis container.
+- Containerized frontend and backend.
+- pnpm workspaces.
+- Git version control.
+
+---
 
 ## Tech Stack
 
@@ -37,6 +96,7 @@ The project is also focused on learning and implementing production-oriented bac
 - Express
 - TypeScript
 - Zod
+- Fetch API
 
 ### Database
 
@@ -45,22 +105,43 @@ The project is also focused on learning and implementing production-oriented bac
 - Prisma Client
 - SQL
 
+### Caching and Background Jobs
+
+- Redis
+- BullMQ
+- ioredis
+- node-redis
+
 ### External API
 
 - [Open-Meteo](https://open-meteo.com/)
+- Open-Meteo Geocoding API
+- Open-Meteo Forecast API
 
-### Development Tools
+### Testing
 
-- pnpm workspaces
-- Git
+- Vitest
+
+### Infrastructure and Development Tools
+
 - Docker
+- Docker Compose
+- pnpm
+- Git
+- GitHub
 - Visual Studio Code
 
-## Project Structure
+---
+
+## Project Architecture
+
+WeatherPulse uses a monorepo architecture with separate frontend and backend applications.
 
 ```text
 weather_from_roman/
+│
 ├── apps/
+│   │
 │   ├── web/
 │   │   └── src/
 │   │       └── app/
@@ -70,64 +151,145 @@ weather_from_roman/
 │   │           └── layout.tsx
 │   │
 │   └── server/
-│       └── src/
-│           ├── schemas/
-│           │   └── weather.schema.ts
-│           ├── services/
-│           │   └── weather.service.ts
-│           ├── prisma.ts
-│           └── index.ts
+│       │
+│       ├── prisma/
+│       │   ├── migrations/
+│       │   └── schema.prisma
+│       │
+│       ├── src/
+│       │   │
+│       │   ├── config/
+│       │   │   ├── redis.ts
+│       │   │   └── queue.redis.ts
+│       │   │
+│       │   ├── generated/
+│       │   │
+│       │   ├── queues/
+│       │   │   └── weather.queue.ts
+│       │   │
+│       │   ├── routes/
+│       │   │   └── weather.routes.ts
+│       │   │
+│       │   ├── schemas/
+│       │   │   └── weather.schema.ts
+│       │   │
+│       │   ├── services/
+│       │   │   └── weather.service.ts
+│       │   │
+│       │   ├── utils/
+│       │   │
+│       │   ├── workers/
+│       │   │   └── weather.worker.ts
+│       │   │
+│       │   ├── index.ts
+│       │   ├── worker.ts
+│       │   └── prisma.ts
+│       │
+│       ├── prisma7.config.ts
+│       └── package.json
 │
+├── compose.yaml
+├── Dockerfile
+├── .dockerignore
+├── .gitignore
 ├── package.json
+├── pnpm-lock.yaml
 ├── pnpm-workspace.yaml
 └── README.md
 ```
+
+---
 
 ## Requirements
 
 Make sure you have installed:
 
-- Node.js
-- pnpm
-- PostgreSQL
-- Docker Desktop (for containerized development)
+- Node.js 22 or compatible supported version.
+- pnpm 11.
+- Docker Desktop.
+- Git.
+
+For local development, you also need access to PostgreSQL and Redis.
+
+---
 
 ## Getting Started
 
-### 1. Install dependencies
+### 1. Clone the repository
 
-From the project root, run:
+```bash
+git clone YOUR_GITHUB_REPOSITORY_URL
+
+cd weather_from_roman
+```
+
+### 2. Install dependencies
 
 ```bash
 pnpm install
 ```
 
-### 2. Configure environment variables
+### 3. Configure environment variables
 
-Configure the environment variables required by the backend, including the PostgreSQL database connection.
+Create the required environment files using your own credentials.
 
-### 3. Start the application
+Backend environment variables:
 
-Run both the frontend and backend from the project root:
+```env
+DATABASE_URL=YOUR_POSTGRESQL_CONNECTION_STRING
+
+REDIS_URL=YOUR_REDIS_CONNECTION_STRING
+
+PORT=5000
+```
+
+The application uses:
+
+- `DATABASE_URL` for PostgreSQL and Prisma.
+- `REDIS_URL` for Redis caching and BullMQ.
+- `PORT` for the Express API server.
+
+**Important:** Never commit `.env` files or expose database credentials, Redis passwords or other secrets in GitHub.
+
+For local Docker development, connection strings must match the Docker Compose network and service configuration.
+
+### 4. Start the application
+
+From the project root:
 
 ```bash
 pnpm dev
 ```
 
-The application will be available at:
+This starts the frontend and backend in parallel.
 
-- Frontend: http://localhost:3000
-- Backend: http://localhost:5000
+### 5. Start the background Worker
+
+In a separate terminal:
+
+```bash
+pnpm --filter server dev:worker
+```
+
+The Worker must run separately from the Express API because it processes background jobs independently.
+
+---
 
 ## API Endpoints
 
-### Health Check
+Base URL:
+
+```text
+http://localhost:5000/api
+```
+
+### 1. Health Check
 
 ```http
 GET /api/health
 ```
 
-Returns the backend health status.
+Checks whether the backend API is running.
 
 Example response:
 
@@ -138,13 +300,13 @@ Example response:
 }
 ```
 
-### Get Weather by City
+### 2. Get Weather by City
 
 ```http
 GET /api/weather?city=Kyiv
 ```
 
-Returns current weather data for the specified city.
+Retrieves current weather information for the specified city.
 
 Example response:
 
@@ -159,246 +321,350 @@ Example response:
 }
 ```
 
-The values above are illustrative examples and may differ from actual weather conditions.
+The values above are illustrative examples.
 
-### Error Responses
+### 3. Get Weather Search History
 
-- `400 Bad Request` — city name is missing or invalid.
-- `404 Not Found` — the requested city could not be found.
-- `502 Bad Gateway` — the external weather service failed or returned invalid data.
-
-## Database
-
-WeatherPulse uses PostgreSQL as its relational database.
-
-The project introduces database management using Prisma ORM.
-
-### Database Technologies
-
-- PostgreSQL for relational data storage.
-- SQL for understanding and working with relational databases.
-- Prisma ORM for database access.
-- Prisma Schema for defining database models.
-- Prisma Migrate for managing database migrations.
-- Prisma Client for type-safe database queries.
-
-### Weather Search Model
-
-The project introduces a `WeatherSearch` model for storing weather search information.
-
-The database table `weather_searches` includes:
-
-- `id` — unique record identifier.
-- `city` — searched city name.
-- `temperature` — recorded temperature.
-- `humidity` — recorded humidity.
-- `windSpeed` — recorded wind speed.
-- `searched_at` — search timestamp.
-
-An index is used to improve queries involving search timestamps.
-
-## Data Validation
-
-WeatherPulse uses Zod to validate responses received from the Open-Meteo API.
-
-This helps ensure that the application works with data that matches the expected structure.
-
-## Type Checking and Build
-
-To check the backend TypeScript code, run:
-
-```bash
-pnpm --filter server typecheck
+```http
+GET /api/history
 ```
 
-To build the frontend and check the backend:
+Retrieves weather search records from PostgreSQL.
 
-```bash
-pnpm run build
+Records are sorted by search timestamp in descending order.
+
+### 4. Delete a History Record
+
+```http
+DELETE /api/history/:id
 ```
 
-## How It Works
+Deletes a weather history record by its ID.
+
+Example:
+
+```http
+DELETE /api/history/1
+```
+
+Example response:
+
+```json
+{
+  "message": "History record deleted",
+  "id": 1
+}
+```
+
+### HTTP Error Responses
+
+| Status | Description                          |
+| ------ | ------------------------------------ |
+| 400    | Invalid or missing city name / ID    |
+| 404    | City or history record not found     |
+| 500    | Internal server or database error    |
+| 502    | External weather service unavailable |
+
+---
+
+## How WeatherPulse Works
+
+### Weather Search Flow
 
 1. The user enters a city name in the frontend.
-2. The frontend sends a request to the Express backend.
-3. The backend searches for the city's coordinates using Open-Meteo Geocoding.
-4. The backend requests current weather data using those coordinates.
-5. Zod validates the external API responses.
-6. The backend processes the weather data.
-7. PostgreSQL provides persistent storage for application data.
-8. The frontend displays the weather information or an error message.
+2. The frontend sends an HTTP request to the Express API.
+3. The backend checks Redis for cached weather data.
+4. If cached data exists, the backend returns it.
+5. If the cache is empty, the backend requests city coordinates from Open-Meteo Geocoding API.
+6. The backend retrieves current weather conditions from Open-Meteo Forecast API.
+7. Zod validates the external API responses.
+8. The weather service formats the result.
+9. The backend stores the weather data in Redis for 10 minutes.
+10. The backend adds a background job to BullMQ.
+11. The API returns weather information to the frontend.
+12. The frontend displays the weather conditions.
 
-## Development Progress
+### Background History Storage Flow
 
-WeatherPulse is being developed in structured learning sections.
+1. The weather service adds a `save-weather-history` job to BullMQ.
+2. Redis stores and manages the job.
+3. The separate Weather Worker retrieves the job.
+4. The Worker extracts the weather information.
+5. Prisma creates a record in PostgreSQL.
+6. BullMQ marks the job as completed or failed.
 
-### Section 1 — Project Foundation and Weather API
+Weather history is saved asynchronously, so the API response does not have to wait for the database insertion.
 
-Completed foundation work:
-
-- Created a pnpm monorepo.
-- Configured the Next.js frontend.
-- Configured the Express backend.
-- Implemented communication between frontend and backend.
-- Integrated the Open-Meteo Geocoding API.
-- Integrated the Open-Meteo Weather API.
-- Implemented asynchronous requests using `fetch`.
-- Added Zod validation for external API responses.
-- Implemented error handling.
-- Added request timeouts.
-- Created a responsive weather interface.
-- Implemented loading and error states.
-- Added TypeScript types and backend validation.
-
-### Section 2 — PostgreSQL and Prisma
-
-Database development and integration:
-
-- Introduction to relational databases.
-- PostgreSQL setup and connection.
-- SQL fundamentals and database queries.
-- Understanding database tables, columns, data types and indexes.
-- Creating the `weather_searches` database table.
-- Connecting the backend to PostgreSQL.
-- Introduction to Prisma ORM.
-- Configuring Prisma in the backend.
-- Creating the `WeatherSearch` Prisma model.
-- Working with the Prisma schema.
-- Learning database migrations.
-- Setting up Prisma Client.
-
-Further development includes database operations, weather search history, query optimization, indexes and transactions.
-
-## Learning Goals
-
-WeatherPulse is a learning project designed to practice:
-
-- Full-stack application architecture.
-- Next.js and React fundamentals.
-- TypeScript.
-- REST API development with Express.
-- Asynchronous programming with `fetch`.
-- External API integration.
-- Data validation with Zod.
-- PostgreSQL and relational database design.
-- SQL queries and database operations.
-- Prisma ORM and Prisma Client.
-- Database migrations.
-- Error handling and application reliability.
-- Git and pnpm workspace workflows.
-- Docker and containerized development.
-
-## License
-
-This project is intended for learning and educational purposes.
-
-## Docker
-
-Для запуску WeatherPulse використовуємо Docker і Docker Compose.
-
-**Використано:**
-
-- Docker Desktop
-- Node.js 22
-- PostgreSQL 17 (`postgres:17-alpine`)
-- Docker Volume `weatherpulse_data`
-- Docker Compose (`compose.yaml`)
-- Docker images: `weather_from_roman-web`, `weather_from_roman-server`
-
-**Порти:**
-
-- Frontend: `3001 → 3000`
-- Backend: `5001 → 5000`
-- PostgreSQL: `5432 → 5432`
-
-**Основні команди:**
-
-```powershell
-# Запуск усіх сервісів
-docker compose up -d --build
-
-# Перегляд статусу
-docker compose ps
-
-# Перегляд логів
-docker compose logs
-docker compose logs web
-docker compose logs server
-docker compose logs db
-
-# Зупинка та повторний запуск
-docker compose stop
-docker compose start
-
-# Перезапуск
-docker compose restart
-
-# Зупинка та видалення контейнерів і мережі
-docker compose down
-
-# Перегляд images і volumes
-docker images
-docker volume ls
-```
-
-**Результат:**
-
-- Frontend Next.js працює в Docker.
-- Backend Express працює в Docker.
-- PostgreSQL працює в Docker.
-- Сервіси взаємодіють через спільну Docker-мережу.
-- Дані PostgreSQL зберігаються у Volume `weatherpulse_data`.
-- Роботу API та історії пошуку перевірено.
-- Перезапуск контейнерів не видаляє дані бази.
-
-**Адреса застосунку:** http://localhost:3001
+---
 
 ## Redis Caching
 
-WeatherPulse uses Redis as an in-memory cache to improve API response times and reduce unnecessary requests to the external Open-Meteo API.
-
-### Features
-
-- Redis integration with Node.js and Express.
-- Weather data caching.
-- Cache Hit and Cache Miss handling.
-- Configurable cache expiration (TTL).
-- Automatic cache expiration.
-- Graceful degradation when Redis is unavailable.
+WeatherPulse uses Redis to reduce unnecessary external API requests and improve response times.
 
 ### Cache Strategy
 
-1. The backend checks Redis for cached weather data.
-2. If cached data exists (Cache Hit), it is returned immediately.
-3. If cached data does not exist (Cache Miss), the backend requests weather data from Open-Meteo.
-4. The result is stored in Redis for 10 minutes.
-5. If Redis is unavailable, the backend continues fetching weather data directly from Open-Meteo.
+The application uses a cache-first approach.
 
-### Redis Configuration
+1. Generate a cache key based on the city name.
+2. Check whether Redis is available.
+3. Attempt to retrieve cached weather data.
+4. If data exists, return the cached result.
+5. If data does not exist, request fresh weather information.
+6. Store the new result in Redis.
+7. Set the cache expiration time to 10 minutes.
 
-```env
-REDIS_URL=redis://redis:6379
+### Cache TTL
+
+```typescript
+const CACHE_TTL = 600;
 ```
 
-For local development outside Docker:
+600 seconds = 10 minutes.
 
-```env
-REDIS_URL=redis://127.0.0.1:6379
+### Cache Key Example
+
+```text
+weather:kyiv
 ```
 
-### Docker
+### Redis Failure Handling
 
-Redis runs as a separate Docker Compose service using the `redis:7-alpine` image.
+If Redis is unavailable, the backend continues operating without caching.
 
-Start Redis:
+The application can still retrieve weather information directly from Open-Meteo.
+
+This approach provides graceful degradation rather than making Redis availability mandatory for weather requests.
+
+---
+
+## Background Jobs — BullMQ
+
+WeatherPulse uses BullMQ to process weather search history asynchronously.
+
+### Technologies
+
+- BullMQ — background job processing.
+- Redis — job storage and queue management.
+- ioredis — Redis connection for BullMQ.
+- Prisma — database access.
+- PostgreSQL — persistent storage.
+
+### Main Components
+
+| File                        | Responsibility                    |
+| --------------------------- | --------------------------------- |
+| `config/queue.redis.ts`     | Redis connection for BullMQ       |
+| `queues/weather.queue.ts`   | Queue configuration and job types |
+| `workers/weather.worker.ts` | Background job processing         |
+| `worker.ts`                 | Worker entry point                |
+
+### Development Commands
+
+Start the API:
 
 ```bash
-docker compose up -d redis
+pnpm --filter server dev
 ```
 
-Check Redis:
+Start the Worker:
 
 ```bash
+pnpm --filter server dev:worker
+```
+
+The API and Worker operate as independent Node.js processes.
+
+---
+
+## Database — PostgreSQL and Prisma
+
+WeatherPulse uses PostgreSQL for persistent storage and Prisma ORM for database operations.
+
+### Database Model
+
+The application uses the `WeatherSearch` model.
+
+The corresponding PostgreSQL table is:
+
+```text
+weather_searches
+```
+
+Main fields:
+
+| Field       | Description                  |
+| ----------- | ---------------------------- |
+| id          | Unique record identifier     |
+| city        | City name                    |
+| description | Optional weather description |
+| temperature | Recorded temperature         |
+| humidity    | Relative humidity            |
+| windSpeed   | Wind speed                   |
+| searched_at | Search timestamp             |
+
+An index is used to improve queries involving search timestamps.
+
+### Prisma Commands
+
+Generate Prisma Client:
+
+```bash
+pnpm --filter server exec prisma generate --config prisma7.config.ts
+```
+
+Check migration status:
+
+```bash
+pnpm --filter server exec prisma migrate status --config prisma7.config.ts
+```
+
+Apply migrations:
+
+```bash
+pnpm --filter server exec prisma migrate deploy --config prisma7.config.ts
+```
+
+The project uses Prisma migrations to manage database schema changes.
+
+---
+
+## Automated Testing
+
+WeatherPulse uses Vitest for automated backend testing.
+
+### Implemented Tests
+
+**Weather Service Tests**
+
+- Successful weather data retrieval.
+- City not found handling.
+- Geocoding API error handling.
+- Forecast API error handling.
+
+**Mocking**
+
+- External HTTP requests.
+- Redis dependencies.
+- BullMQ dependencies.
+
+**Utility Tests**
+
+- Utility function validation.
+
+### Run Tests
+
+Run all backend tests:
+
+```bash
+pnpm --filter server exec vitest run
+```
+
+Run tests in watch mode:
+
+```bash
+pnpm --filter server exec vitest
+```
+
+The current documented test suite contains 6 automated tests.
+
+Additional integration and end-to-end testing can be introduced as the project develops.
+
+---
+
+## Docker and Docker Compose
+
+WeatherPulse uses Docker and Docker Compose to run the application infrastructure in containers.
+
+### Docker Services
+
+| Service  | Image / Technology |
+| -------- | ------------------ |
+| Web      | Next.js            |
+| Server   | Node.js + Express  |
+| Database | PostgreSQL 17      |
+| Redis    | Redis 7            |
+
+### Local Development Ports
+
+| Service    | Local Port | Container Port |
+| ---------- | ---------: | -------------: |
+| Frontend   |       3001 |           3000 |
+| Backend    |       5001 |           5000 |
+| PostgreSQL |       5432 |           5432 |
+| Redis      |       6379 |           6379 |
+
+### Docker Commands
+
+Build and start all containers:
+
+```powershell
+docker compose up -d --build
+```
+
+Check running containers:
+
+```powershell
+docker compose ps
+```
+
+View all logs:
+
+```powershell
+docker compose logs
+```
+
+View individual service logs:
+
+```powershell
+docker compose logs web
+docker compose logs server
+docker compose logs db
+docker compose logs redis
+```
+
+Stop containers:
+
+```powershell
+docker compose stop
+```
+
+Start existing containers:
+
+```powershell
+docker compose start
+```
+
+Restart containers:
+
+```powershell
+docker compose restart
+```
+
+Stop containers and remove the Compose network:
+
+```powershell
+docker compose down
+```
+
+Check Docker images:
+
+```powershell
+docker images
+```
+
+Check Docker volumes:
+
+```powershell
+docker volume ls
+```
+
+**Important:** `docker compose down -v` also removes associated volumes and can permanently delete local database data. Do not use it unless you intentionally want to remove that data.
+
+### Docker Redis Check
+
+Check Redis connectivity:
+
+```powershell
 docker exec weatherpulse-redis redis-cli ping
 ```
 
@@ -408,90 +674,153 @@ Expected response:
 PONG
 ```
 
-### Cache Configuration
+### Docker Development Results
 
-The cache expiration time is configured using `CACHE_TTL`.
+- Next.js runs in a container.
+- Express runs in a container.
+- PostgreSQL runs in a container.
+- Redis runs in a container.
+- Services communicate through a shared Docker network.
+- PostgreSQL data is persisted using a Docker volume.
+- API and database connectivity have been tested.
 
-```typescript
-const CACHE_TTL = 600;
-```
+---
 
-This means cached weather data expires after 10 minutes.
+## Build and Type Checking
 
-### Background Jobs — BullMQ
-
-WeatherPulse uses **BullMQ** and **Redis** to process weather search history asynchronously.
-
-Instead of saving every search directly during the HTTP request, the backend adds a job to the `weather-history` queue. A separate Worker processes the job and saves the search data to PostgreSQL using Prisma.
-
-**How it works:**
-
-1. The user searches for a city.
-2. The Express backend retrieves weather data from Open-Meteo or Redis cache.
-3. The backend adds a `save-weather-history` job to the BullMQ queue.
-4. Redis stores and manages the queued job.
-5. The Weather Worker retrieves the job.
-6. Prisma saves the weather search history in PostgreSQL.
-7. BullMQ marks the job as completed or failed.
-
-**Technologies:**
-
-- BullMQ — background job and queue management.
-- Redis — queue storage and job state management.
-- ioredis — Redis connection for BullMQ.
-- Prisma — database operations.
-- PostgreSQL — persistent weather search history.
-
-**Main components:**
-
-- `config/queue.redis.ts` — Redis connection for BullMQ.
-- `queues/weather.queue.ts` — weather history queue and job data types.
-- `workers/weather.worker.ts` — background job processor.
-- `worker.ts` — separate Worker entry point.
-
-**Development commands:**
+### Backend Type Checking
 
 ```bash
-# Start the Express backend
-pnpm --filter server dev
-
-# Start the background Worker
-pnpm --filter server dev:worker
+pnpm --filter server typecheck
 ```
 
-The backend and Worker run as separate processes.
+### Production Build
 
-The implementation supports asynchronous weather history storage for both Redis cache hits and cache misses.
-///////////////////////////////////
-
-### Automated Testing
-
-WeatherPulse uses **Vitest** for automated testing of backend functionality.
-
-#### Implemented tests
-
-- **Unit tests:** basic utility function testing.
-- **Weather service tests:**
-  - Successful weather data retrieval.
-  - Handling cities that cannot be found (`CITY_NOT_FOUND`).
-  - Handling Geocoding API errors.
-  - Handling Forecast API errors.
-- **Mocking:** external API requests, Redis and BullMQ dependencies are mocked to isolate the weather service during testing.
-
-#### Running tests
-
-Run all backend tests:
+From the project root:
 
 ```bash
-pnpm --filter server exec vitest run
+pnpm build
 ```
 
-#### Current test coverage
+The root build script builds the Next.js frontend and checks the backend TypeScript code.
 
-- Utility function tests: 2
-- Weather service tests: 4
-- Total: 6 automated tests
+The backend also has its own build script:
 
-All 6 tests pass successfully.
+```bash
+pnpm --filter server build
+```
 
-Additional integration and end-to-end tests are planned for subsequent stages of development.
+This generates Prisma Client and compiles the backend TypeScript code.
+
+---
+
+## Environment and Deployment
+
+WeatherPulse is being prepared for production deployment.
+
+The planned production architecture separates the frontend, API, background Worker, database and Redis infrastructure.
+
+### Planned Deployment Services
+
+| Component         | Planned Platform |
+| ----------------- | ---------------- |
+| Frontend          | Vercel           |
+| Backend API       | Render           |
+| Background Worker | Render           |
+| PostgreSQL        | Neon             |
+| Redis             | Upstash          |
+| Source Code       | GitHub           |
+
+### Production Architecture
+
+```text
+             USER
+               |
+               v
+        VERCEL FRONTEND
+          (Next.js)
+               |
+               v
+         RENDER API
+          (Express)
+               |
+        +------+------+
+        |             |
+        v             v
+      REDIS        OPEN-METEO
+     (Cache)       (Weather API)
+        |
+        v
+     BULLMQ
+        |
+        v
+   BACKGROUND WORKER
+        |
+        v
+      NEON
+   (PostgreSQL)
+```
+
+The production deployment is planned. The services and deployment configuration will be documented and updated after successful publication.
+
+Production environment variables and credentials must be configured through the respective hosting platforms, not committed to the repository.
+
+---
+
+## Learning Goals
+
+WeatherPulse is a practical full-stack learning project focused on developing professional engineering skills.
+
+The project covers:
+
+- Monorepo architecture.
+- Next.js and React.
+- TypeScript.
+- Node.js and Express.
+- REST API development.
+- Asynchronous programming.
+- External API integration.
+- Zod validation.
+- Error handling.
+- Retry mechanisms.
+- PostgreSQL.
+- SQL fundamentals.
+- Prisma ORM.
+- Database migrations.
+- Redis caching.
+- Cache expiration and TTL.
+- BullMQ background jobs.
+- Worker architecture.
+- Automated testing with Vitest.
+- Docker and Docker Compose.
+- Git and GitHub.
+- Production build and deployment.
+
+---
+
+## Project Status
+
+WeatherPulse is under active development.
+
+Implemented functionality includes:
+
+- Full-stack application foundation.
+- Weather search through Open-Meteo.
+- Backend API.
+- Zod response validation.
+- PostgreSQL integration.
+- Prisma ORM and migrations.
+- Weather search history.
+- Redis caching.
+- BullMQ background processing.
+- Separate Weather Worker.
+- Docker Compose infrastructure.
+- Backend automated tests.
+
+Production deployment and final production verification are the next development stages.
+
+---
+
+## License
+
+This project is developed for educational and portfolio purposes.
