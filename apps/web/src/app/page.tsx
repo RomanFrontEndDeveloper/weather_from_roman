@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import styles from "./page.module.css";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
 type Weather = {
   city: string;
   country: string;
@@ -75,7 +77,7 @@ export default function Home() {
     setHistoryError("");
 
     try {
-      const response = await fetch("/api/history");
+      const response = await fetch(`${API_URL}/api/history`);
 
       if (!response.ok) {
         throw new Error("Failed to load search history");
@@ -97,7 +99,7 @@ export default function Home() {
     setHistoryError("");
 
     try {
-      const response = await fetch(`/api/history/${id}`, {
+      const response = await fetch(`${API_URL}/api/history/${id}`, {
         method: "DELETE",
       });
 
@@ -140,7 +142,7 @@ export default function Home() {
 
     try {
       const response = await fetch(
-        `/api/weather?city=${encodeURIComponent(trimmedCity)}`,
+        `${API_URL}/api/weather?city=${encodeURIComponent(trimmedCity)}`,
       );
 
       const data = await response.json();

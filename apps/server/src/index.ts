@@ -1,11 +1,13 @@
 import express from "express";
 import cors from "cors";
+
 import weatherRouter from "./routes/weather.routes.js";
 import { connectRedis } from "./config/redis.js";
 
 import "./workers/weather.worker.js";
 
 const app = express();
+
 const PORT = Number(process.env.PORT) || 5000;
 
 app.use(cors());
@@ -19,7 +21,7 @@ const startServer = () => {
   });
 
   app.listen(PORT, () => {
-    console.log(`WeatherPulse API running at http://localhost:${PORT}`);
+    console.log(`WeatherPulse API running on port ${PORT}`);
   });
 };
 
