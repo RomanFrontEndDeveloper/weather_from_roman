@@ -2,11 +2,15 @@
 
 **WeatherPulse** is a full-stack weather application built with Next.js, React, TypeScript, Node.js, Express, PostgreSQL, Prisma, Redis and BullMQ.
 
-The application allows users to search for cities, retrieve current weather conditions, view weather information and manage weather search history.
+The application allows users to search for cities worldwide, retrieve current weather conditions, view weather information and manage their weather search history.
 
-Weather data is retrieved from the Open-Meteo API, validated with Zod, cached in Redis and stored asynchronously in PostgreSQL through BullMQ background jobs.
+Weather data is retrieved through a **dual-provider architecture** using Open-Meteo as the primary provider and WeatherAPI.com as a fallback provider. External API responses are validated with Zod, weather data is cached in Redis, and search history is stored asynchronously in PostgreSQL through BullMQ background jobs.
 
-The project is developed as a pnpm monorepo and focuses on modern full-stack architecture, backend engineering, database management, automated testing, containerization and production deployment.
+The project is developed as a pnpm monorepo and demonstrates modern full-stack architecture, backend engineering, external API integration, database management, caching, background processing, automated testing, containerization and production deployment.
+
+**Live Application:** https://weather-from-roman.vercel.app
+
+**Backend API:** https://weather-from-roman.onrender.com
 
 ---
 
@@ -20,7 +24,21 @@ The project is developed as a pnpm monorepo and focuses on modern full-stack arc
 - Display weather conditions using weather codes and icons.
 - Responsive dark-themed interface.
 - Loading and error states.
-- Input validation and error handling.
+- Input validation.
+- Weather search history.
+- Delete individual search history records.
+
+### Dual Weather API Architecture
+
+- Open-Meteo as the primary weather provider.
+- WeatherAPI.com as the secondary provider.
+- Automatic fallback when the primary provider fails.
+- External API response validation using Zod.
+- WeatherAPI condition-code normalization.
+- HTTP error handling.
+- Retry handling for temporary API failures.
+- Request timeout protection.
+- Provider-specific error logging.
 
 ### Backend
 
@@ -28,8 +46,8 @@ The project is developed as a pnpm monorepo and focuses on modern full-stack arc
 - TypeScript-based backend architecture.
 - External API integration using Fetch API.
 - Zod validation for external API responses.
-- Retry mechanism for temporary external API failures.
-- HTTP error handling.
+- Centralized weather service.
+- Error handling and HTTP status management.
 - Separate API and background Worker processes.
 
 ### Database
@@ -78,6 +96,7 @@ The project is developed as a pnpm monorepo and focuses on modern full-stack arc
 - Containerized frontend and backend.
 - pnpm workspaces.
 - Git version control.
+- Production deployment with Vercel and Render.
 
 ---
 
@@ -112,11 +131,13 @@ The project is developed as a pnpm monorepo and focuses on modern full-stack arc
 - ioredis
 - node-redis
 
-### External API
+### External APIs
 
 - [Open-Meteo](https://open-meteo.com/)
 - Open-Meteo Geocoding API
 - Open-Meteo Forecast API
+- [WeatherAPI.com](https://www.weatherapi.com/)
+- WeatherAPI Current Weather API
 
 ### Testing
 
@@ -130,6 +151,13 @@ The project is developed as a pnpm monorepo and focuses on modern full-stack arc
 - Git
 - GitHub
 - Visual Studio Code
+
+### Production Deployment
+
+- Vercel
+- Render
+- Neon PostgreSQL
+- Upstash Redis
 
 ---
 
@@ -157,7 +185,6 @@ weather_from_roman/
 │       │   └── schema.prisma
 │       │
 │       ├── src/
-│       │   │
 │       │   ├── config/
 │       │   │   ├── redis.ts
 │       │   │   └── queue.redis.ts
@@ -233,23 +260,40 @@ pnpm install
 
 Create the required environment files using your own credentials.
 
-Backend environment variables:
+**Backend environment variables:**
 
 ```env
 DATABASE_URL=YOUR_POSTGRESQL_CONNECTION_STRING
 
 REDIS_URL=YOUR_REDIS_CONNECTION_STRING
 
+WEATHERAPI_KEY=YOUR_WEATHERAPI_KEY
+
 PORT=5000
+
+NODE_ENV=development
+```
+
+**Frontend environment variables:**
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:5000
 ```
 
 The application uses:
 
-- `DATABASE_URL` for PostgreSQL and Prisma.
-- `REDIS_URL` for Redis caching and BullMQ.
-- `PORT` for the Express API server.
+| Variable              | Purpose                         |
+| --------------------- | ------------------------------- |
+| `DATABASE_URL`        | PostgreSQL connection           |
+| `REDIS_URL`           | Redis connection and BullMQ     |
+| `WEATHERAPI_KEY`      | WeatherAPI authentication       |
+| `PORT`                | Express API server port         |
+| `NODE_ENV`            | Application environment         |
+| `NEXT_PUBLIC_API_URL` | Backend API URL used by Next.js |
 
-**Important:** Never commit `.env` files or expose database credentials, Redis passwords or other secrets in GitHub.
+**Important:** Never commit `.env` files or expose database credentials, Redis passwords or API keys in GitHub.
+
+`NEXT_PUBLIC_API_URL` is intentionally public because it is used by the frontend. Never place private API keys in `NEXT_PUBLIC_` variables.
 
 For local Docker development, connection strings must match the Docker Compose network and service configuration.
 
@@ -271,13 +315,19 @@ In a separate terminal:
 pnpm --filter server dev:worker
 ```
 
-The Worker must run separately from the Express API because it processes background jobs independently.
+The Worker runs separately from the Express API and processes background jobs independently.
 
 ---
 
 ## API Endpoints
 
-Base URL:
+**Production Base URL:**
+
+```text
+https://weather-from-roman.onrender.com/api
+```
+
+**Local Base URL:**
 
 ```text
 http://localhost:5000/api
@@ -303,7 +353,7 @@ Example response:
 ### 2. Get Weather by City
 
 ```http
-GET /api/weather?city=Kyiv
+GET /api/weather?city=Khmelnytskyi
 ```
 
 Retrieves current weather information for the specified city.
@@ -312,7 +362,7 @@ Example response:
 
 ```json
 {
-  "city": "Kyiv",
+  "city": "Khmelnytskyi",
   "country": "Ukraine",
   "temperature": 7.5,
   "humidity": 83,
@@ -322,6 +372,8 @@ Example response:
 ```
 
 The values above are illustrative examples.
+
+The weather provider may be Open-Meteo or WeatherAPI depending on availability.
 
 ### 3. Get Weather Search History
 
@@ -358,12 +410,12 @@ Example response:
 
 ### HTTP Error Responses
 
-| Status | Description                          |
-| ------ | ------------------------------------ |
-| 400    | Invalid or missing city name / ID    |
-| 404    | City or history record not found     |
-| 500    | Internal server or database error    |
-| 502    | External weather service unavailable |
+| Status | Description                            |
+| ------ | -------------------------------------- |
+| 400    | Invalid or missing city name / ID      |
+| 404    | City or history record not found       |
+| 500    | Internal server or database error      |
+| 502    | External weather providers unavailable |
 
 ---
 
@@ -373,16 +425,61 @@ Example response:
 
 1. The user enters a city name in the frontend.
 2. The frontend sends an HTTP request to the Express API.
-3. The backend checks Redis for cached weather data.
-4. If cached data exists, the backend returns it.
-5. If the cache is empty, the backend requests city coordinates from Open-Meteo Geocoding API.
-6. The backend retrieves current weather conditions from Open-Meteo Forecast API.
-7. Zod validates the external API responses.
-8. The weather service formats the result.
-9. The backend stores the weather data in Redis for 10 minutes.
-10. The backend adds a background job to BullMQ.
-11. The API returns weather information to the frontend.
-12. The frontend displays the weather conditions.
+3. The backend generates a Redis cache key.
+4. The backend checks Redis for cached weather data.
+5. If cached data exists, the backend returns it.
+6. If the cache is empty, the backend requests city coordinates from Open-Meteo Geocoding API.
+7. Open-Meteo Forecast API retrieves current weather conditions.
+8. Zod validates the external API responses.
+9. If Open-Meteo fails, the backend switches to WeatherAPI.com.
+10. WeatherAPI retrieves current weather conditions using the configured API key.
+11. Zod validates the WeatherAPI response.
+12. WeatherAPI condition codes are normalized into the application's weather-code format.
+13. The backend formats the weather result.
+14. The result is stored in Redis for 10 minutes.
+15. A background job is added to BullMQ.
+16. The API returns weather information to the frontend.
+17. The frontend displays the weather conditions.
+
+### Weather Provider Fallback Flow
+
+WeatherPulse uses a primary and secondary weather provider.
+
+```text
+          USER REQUEST
+                |
+                v
+          EXPRESS API
+                |
+                v
+          REDIS CACHE
+                |
+         +------+------+
+         |             |
+       CACHE HIT    CACHE MISS
+         |             |
+         v             v
+       RETURN      OPEN-METEO
+       WEATHER       REQUEST
+                       |
+                 +-----+-----+
+                 |           |
+               SUCCESS      FAILURE
+                 |           |
+                 v           v
+             RETURN      WEATHERAPI
+             WEATHER      REQUEST
+                             |
+                       +-----+-----+
+                       |           |
+                     SUCCESS      FAILURE
+                       |           |
+                       v           v
+                   RETURN       ERROR
+                   WEATHER
+```
+
+This architecture improves reliability by allowing the application to retrieve weather information from a secondary provider when the primary provider is unavailable or reaches its request limit.
 
 ### Background History Storage Flow
 
@@ -424,14 +521,14 @@ const CACHE_TTL = 600;
 ### Cache Key Example
 
 ```text
-weather:kyiv
+weather:khmelnytskyi
 ```
 
 ### Redis Failure Handling
 
 If Redis is unavailable, the backend continues operating without caching.
 
-The application can still retrieve weather information directly from Open-Meteo.
+The application can still retrieve weather information directly from the configured weather providers.
 
 This approach provides graceful degradation rather than making Redis availability mandatory for weather requests.
 
@@ -564,8 +661,6 @@ Run tests in watch mode:
 ```bash
 pnpm --filter server exec vitest
 ```
-
-The current documented test suite contains 6 automated tests.
 
 Additional integration and end-to-end testing can be introduced as the project develops.
 
@@ -714,56 +809,103 @@ This generates Prisma Client and compiles the backend TypeScript code.
 
 ---
 
-## Environment and Deployment
+## Production Deployment
 
-WeatherPulse is being prepared for production deployment.
-
-The planned production architecture separates the frontend, API, background Worker, database and Redis infrastructure.
-
-### Planned Deployment Services
-
-| Component         | Planned Platform |
-| ----------------- | ---------------- |
-| Frontend          | Vercel           |
-| Backend API       | Render           |
-| Background Worker | Render           |
-| PostgreSQL        | Neon             |
-| Redis             | Upstash          |
-| Source Code       | GitHub           |
+WeatherPulse is deployed using separate cloud services for the frontend, backend, database and Redis infrastructure.
 
 ### Production Architecture
 
+| Component            | Platform       |
+| -------------------- | -------------- |
+| Frontend             | Vercel         |
+| Backend API          | Render         |
+| PostgreSQL           | Neon           |
+| Redis                | Upstash        |
+| Source Code          | GitHub         |
+| Primary Weather API  | Open-Meteo     |
+| Fallback Weather API | WeatherAPI.com |
+
+### Live Services
+
+**Frontend**
+
+https://weather-from-roman.vercel.app
+
+**Backend API**
+
+https://weather-from-roman.onrender.com
+
+**Backend Health Check**
+
+https://weather-from-roman.onrender.com/api/health
+
+### Production Architecture Diagram
+
 ```text
-             USER
-               |
-               v
-        VERCEL FRONTEND
-          (Next.js)
-               |
-               v
-         RENDER API
-          (Express)
-               |
-        +------+------+
-        |             |
-        v             v
-      REDIS        OPEN-METEO
-     (Cache)       (Weather API)
-        |
-        v
-     BULLMQ
-        |
-        v
-   BACKGROUND WORKER
-        |
-        v
-      NEON
-   (PostgreSQL)
+                   USER
+                    |
+                    v
+             VERCEL FRONTEND
+                 Next.js
+                    |
+                    v
+              RENDER API
+                Express
+                    |
+          +---------+---------+
+          |         |         |
+          v         v         v
+        REDIS   OPEN-METEO  WEATHERAPI
+       Upstash   PRIMARY     FALLBACK
+          |
+          v
+        BULLMQ
+          |
+          v
+    BACKGROUND WORKER
+          |
+          v
+       POSTGRESQL
+          Neon
 ```
 
-The production deployment is planned. The services and deployment configuration will be documented and updated after successful publication.
+### Production Environment Variables
 
-Production environment variables and credentials must be configured through the respective hosting platforms, not committed to the repository.
+Configure environment variables through the respective hosting platforms.
+
+**Vercel — Frontend**
+
+```env
+NEXT_PUBLIC_API_URL=https://weather-from-roman.onrender.com
+```
+
+**Render — Backend**
+
+```env
+DATABASE_URL=YOUR_NEON_DATABASE_URL
+
+REDIS_URL=YOUR_UPSTASH_REDIS_URL
+
+WEATHERAPI_KEY=YOUR_WEATHERAPI_KEY
+
+NODE_ENV=production
+```
+
+The Render service uses the port provided by the hosting environment.
+
+**Security considerations:**
+
+- Never commit production credentials.
+- Keep API keys on the backend.
+- Do not expose `WEATHERAPI_KEY` to the frontend.
+- Use environment variables for sensitive configuration.
+- Keep database and Redis connection strings private.
+
+### Deployment Considerations
+
+Render free instances may spin down after inactivity, which can delay the first request.
+
+External weather providers may also enforce request limits. The fallback architecture helps maintain weather service availability when the primary provider encounters errors, provided the secondary provider remains available.
 
 ---
 
@@ -780,6 +922,7 @@ The project covers:
 - REST API development.
 - Asynchronous programming.
 - External API integration.
+- Multiple API providers and fallback architecture.
 - Zod validation.
 - Error handling.
 - Retry mechanisms.
@@ -795,19 +938,26 @@ The project covers:
 - Docker and Docker Compose.
 - Git and GitHub.
 - Production build and deployment.
+- Environment configuration.
+- Cloud infrastructure.
 
 ---
 
 ## Project Status
 
-WeatherPulse is under active development.
+<sub>Current status: November 2026</sub>
 
-Implemented functionality includes:
+<details>
+<summary><strong>Implemented functionality</strong></summary>
 
 - Full-stack application foundation.
+- Next.js frontend.
+- Express backend API.
 - Weather search through Open-Meteo.
-- Backend API.
+- WeatherAPI.com fallback integration.
+- Automatic weather provider switching.
 - Zod response validation.
+- Weather condition code normalization.
 - PostgreSQL integration.
 - Prisma ORM and migrations.
 - Weather search history.
@@ -816,8 +966,15 @@ Implemented functionality includes:
 - Separate Weather Worker.
 - Docker Compose infrastructure.
 - Backend automated tests.
+- Production frontend deployment on Vercel.
+- Production backend deployment on Render.
+- Neon PostgreSQL integration.
+- Upstash Redis integration.
+- Production environment configuration.
 
-Production deployment and final production verification are the next development stages.
+</details>
+
+WeatherPulse is a deployed full-stack application. Further development can focus on production hardening, monitoring, expanded automated testing, performance optimization and additional weather features.
 
 ---
 
