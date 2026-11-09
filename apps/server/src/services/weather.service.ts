@@ -381,7 +381,7 @@ async function getWeatherFromWeatherApi(
   );
 
   return {
-    city: data.location.name,
+    city: city.trim(),
     country: data.location.country,
     temperature: data.current.temp_c,
     humidity: data.current.humidity,
