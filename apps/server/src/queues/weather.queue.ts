@@ -13,9 +13,24 @@ export interface WeatherHistoryJobData {
 }
 
 // Створюємо чергу для історії пошуку погоди.
+
 export const weatherQueue = new Queue<WeatherHistoryJobData>(
   "weather-history",
   {
     connection: queueRedis,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: {
+        type: "exponential",
+        delay: 1000,
+      },
+      removeOnComplete: {
+        age: 3600,
+        count: 1000,
+      },
+      removeOnFail: {
+        age: 86400,
+      },
+    },
   },
 );

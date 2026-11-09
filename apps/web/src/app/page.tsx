@@ -1,11 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
+
 import Link from "next/link";
+
 import styles from "./page.module.css";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+// API URL
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+// Weather types
 type Weather = {
   city: string;
   country: string;
@@ -15,6 +20,7 @@ type Weather = {
   weatherCode: number;
 };
 
+// History types
 type HistoryRecord = {
   id: number;
   city: string;
@@ -24,6 +30,7 @@ type HistoryRecord = {
   searched_at: string;
 };
 
+// WMO weather code descriptions
 function getWeatherDescription(code: number) {
   if (code === 0) {
     return { description: "Clear sky", icon: "☀️" };
@@ -61,40 +68,73 @@ function getWeatherDescription(code: number) {
 }
 
 export default function Home() {
+  // Weather state
   const [city, setCity] = useState("Khmelnytskyi");
   const [weather, setWeather] = useState<Weather | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // History state
   const [history, setHistory] = useState<HistoryRecord[]>([]);
   const [historyVisible, setHistoryVisible] = useState(true);
-  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState("");
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  const loadHistory = useCallback(async () => {
-    setHistoryLoading(true);
-    setHistoryError("");
-
-    try {
-      const response = await fetch(`${API_URL}/api/history`);
+  // Load search history
+  // This function only fetches data.
+  // It does not modify React state.
+  const loadHistory = useCallback(
+    async (signal?: AbortSignal): Promise<HistoryRecord[]> => {
+      const response = await fetch(`${API_URL}/api/history`, {
+        signal,
+      });
 
       if (!response.ok) {
         throw new Error("Failed to load search history");
       }
 
       const data: HistoryRecord[] = await response.json();
-      setHistory(data);
-    } catch (error) {
-      setHistoryError(
-        error instanceof Error ? error.message : "Something went wrong",
-      );
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, []);
 
-  async function handleDeleteHistory(id: number) {
+      return data;
+    },
+    [],
+  );
+
+  // Initial history loading
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function initializeHistory() {
+      try {
+        const data = await loadHistory(controller.signal);
+
+        if (controller.signal.aborted) return;
+
+        setHistory(data);
+        setHistoryError("");
+      } catch (error) {
+        if (controller.signal.aborted) return;
+
+        setHistoryError(
+          error instanceof Error ? error.message : "Something went wrong",
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setHistoryLoading(false);
+        }
+      }
+    }
+
+    void initializeHistory();
+
+    return () => {
+      controller.abort();
+    };
+  }, [loadHistory]);
+
+  // Delete history record
+  async function handleDeleteHistory(id: number): Promise<void> {
     setDeletingId(id);
     setHistoryError("");
 
@@ -121,26 +161,22 @@ export default function Home() {
     }
   }
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      void loadHistory();
-    }, 0);
-
-    return () => clearTimeout(timer);
-  }, [loadHistory]);
-
-  async function handleSearch(event: React.FormEvent<HTMLFormElement>) {
+  // Search weather by city
+  async function handleSearch(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault();
 
     const trimmedCity = city.trim();
 
-    if (!trimmedCity) return;
+    if (!trimmedCity || loading) return;
 
     setLoading(true);
     setError("");
     setWeather(null);
 
     try {
+      // Request weather from backend
       const response = await fetch(
         `${API_URL}/api/weather?city=${encodeURIComponent(trimmedCity)}`,
       );
@@ -151,8 +187,26 @@ export default function Home() {
         throw new Error(data.message || "Failed to fetch weather");
       }
 
+      // Update weather state
       setWeather(data as Weather);
-      await loadHistory();
+
+      // Refresh history after successful search
+      setHistoryLoading(true);
+      setHistoryError("");
+
+      try {
+        const updatedHistory = await loadHistory();
+
+        setHistory(updatedHistory);
+      } catch (historyError) {
+        setHistoryError(
+          historyError instanceof Error
+            ? historyError.message
+            : "Failed to refresh history",
+        );
+      } finally {
+        setHistoryLoading(false);
+      }
     } catch (error) {
       setError(error instanceof Error ? error.message : "Something went wrong");
     } finally {
@@ -160,6 +214,7 @@ export default function Home() {
     }
   }
 
+  // Current weather information
   const weatherInfo = weather
     ? getWeatherDescription(weather.weatherCode)
     : null;
@@ -167,29 +222,36 @@ export default function Home() {
   return (
     <main className={styles.page}>
       <div className={styles.container}>
+        {/* Header */}
         <header className={styles.header}>
           <Link className={styles.logo} href="/">
             <span className={styles.logoIcon}>W</span>
             WeatherPulse
           </Link>
+
           <span className={styles.headerLabel}>LIVE WEATHER</span>
         </header>
 
+        {/* Hero section */}
         <section className={styles.hero}>
           <p className={styles.eyebrow}>YOUR WEATHER, AT A GLANCE</p>
+
           <h1>
             Every day,
             <br />
             <span>in focus.</span>
           </h1>
+
           <p className={styles.subtitle}>
             Discover current weather conditions in any city around the world.
           </p>
 
+          {/* Search form */}
           <form className={styles.searchForm} onSubmit={handleSearch}>
             <span className={styles.searchIcon} aria-hidden="true">
               ⌕
             </span>
+
             <input
               className={styles.input}
               type="text"
@@ -199,6 +261,7 @@ export default function Home() {
               aria-label="City name"
               required
             />
+
             <button
               className={styles.searchButton}
               type="submit"
@@ -224,14 +287,18 @@ export default function Home() {
           )}
         </section>
 
+        {/* Weather card */}
         {weather ? (
           <section className={styles.weatherCard} aria-live="polite">
             <div className={styles.weatherTop}>
               <div>
                 <p className={styles.cardLabel}>CURRENT WEATHER</p>
+
                 <h2 className={styles.city}>{weather.city}</h2>
+
                 <p className={styles.country}>{weather.country}</p>
               </div>
+
               <div className={styles.weatherIcon} aria-hidden="true">
                 {weatherInfo?.icon}
               </div>
@@ -241,6 +308,7 @@ export default function Home() {
               <span className={styles.temperature}>
                 {weather.temperature.toFixed(1)}°
               </span>
+
               <span className={styles.celsius}>C</span>
             </div>
 
@@ -251,7 +319,9 @@ export default function Home() {
                 <span className={styles.statIcon} aria-hidden="true">
                   ◉
                 </span>
+
                 <span className={styles.statLabel}>Humidity</span>
+
                 <strong>{weather.humidity}%</strong>
               </div>
 
@@ -259,7 +329,9 @@ export default function Home() {
                 <span className={styles.statIcon} aria-hidden="true">
                   ↗
                 </span>
+
                 <span className={styles.statLabel}>Wind speed</span>
+
                 <strong>{weather.windSpeed} km/h</strong>
               </div>
             </div>
@@ -269,17 +341,21 @@ export default function Home() {
             <span className={styles.emptyIcon} aria-hidden="true">
               ☁
             </span>
+
             <div>
               <h2>Your weather starts here</h2>
+
               <p>Search for a city to see its current conditions.</p>
             </div>
           </section>
         )}
 
+        {/* Search history */}
         <section className={styles.historySection}>
           <div className={styles.historyHeader}>
             <div>
               <h2>Search history</h2>
+
               <p>Your recent weather searches</p>
             </div>
 
@@ -324,26 +400,31 @@ export default function Home() {
                       {history.map((record) => (
                         <tr key={record.id}>
                           <td>{record.city}</td>
+
                           <td>
                             {record.temperature === null
                               ? "—"
                               : `${record.temperature} °C`}
                           </td>
+
                           <td>
                             {record.humidity === null
                               ? "—"
                               : `${record.humidity}%`}
                           </td>
+
                           <td>
                             {record.windSpeed === null
                               ? "—"
                               : `${record.windSpeed} km/h`}
                           </td>
+
                           <td>
                             {new Date(record.searched_at).toLocaleString(
                               "uk-UA",
                             )}
                           </td>
+
                           <td>
                             <button
                               className={styles.deleteButton}
@@ -366,8 +447,10 @@ export default function Home() {
           )}
         </section>
 
+        {/* Footer */}
         <footer className={styles.footer}>
           <span>WeatherPulse</span>
+
           <span>Weather data powered by Open-Meteo</span>
         </footer>
       </div>
