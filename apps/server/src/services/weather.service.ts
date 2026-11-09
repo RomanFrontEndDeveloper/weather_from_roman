@@ -1,4 +1,3 @@
-
 import { z } from "zod";
 
 import {
@@ -17,6 +16,7 @@ import type { WeatherHistoryJobData } from "../queues/weather.queue.js";
 
 const CACHE_TTL = 600;
 const REQUEST_TIMEOUT = 10_000;
+
 const MAX_OPEN_METEO_ATTEMPTS = 2;
 
 const RETRYABLE_STATUS_CODES = [500, 502, 503, 504];
@@ -32,6 +32,13 @@ type WeatherResult = {
   humidity: number;
   windSpeed: number;
   weatherCode: number;
+};
+
+type OpenMeteoLocation = {
+  name: string;
+  country: string;
+  latitude: number;
+  longitude: number;
 };
 
 // ============================================
@@ -64,12 +71,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // ============================================
 // WEATHER CODE NORMALIZATION
 // ============================================
 
 // WeatherAPI uses its own condition codes.
-// We convert them into WMO codes used by the frontend.
+// Convert them into WMO codes used by the frontend.
 
 const WEATHERAPI_TO_WMO: Record<number, number> = {
   1000: 0,
@@ -157,17 +168,59 @@ async function addWeatherHistoryJob(
 }
 
 // ============================================
+// OPEN-METEO GEOCODING
+// ============================================
+
+async function getOpenMeteoLocation(city: string): Promise<OpenMeteoLocation> {
+  console.log(`OPEN-METEO: geocoding ${city}`);
+
+  const geocodingUrl = new URL(
+    "https://geocoding-api.open-meteo.com/v1/search",
+  );
+
+  geocodingUrl.searchParams.set("name", city);
+  geocodingUrl.searchParams.set("count", "1");
+  geocodingUrl.searchParams.set("language", "en");
+  geocodingUrl.searchParams.set("format", "json");
+
+  const response = await fetch(geocodingUrl, {
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+  });
+
+  if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error("OPEN_METEO_GEOCODING_RATE_LIMIT");
+    }
+
+    throw new Error(`GEOCODING_HTTP_${response.status}`);
+  }
+
+  const data = geocodingResponseSchema.parse(await response.json());
+
+  const location = data.results?.[0];
+
+  if (!location) {
+    throw new Error("CITY_NOT_FOUND");
+  }
+
+  console.log(
+    `OPEN-METEO: location found ${location.name}, ${location.country}`,
+  );
+
+  return {
+    name: location.name,
+    country: location.country,
+    latitude: location.latitude,
+    longitude: location.longitude,
+  };
+}
+
+// ============================================
 // OPEN-METEO RETRY
 // ============================================
 
-async function fetchOpenMeteoWithRetry(
-  url: URL,
-): Promise<Response> {
-  for (
-    let attempt = 1;
-    attempt <= MAX_OPEN_METEO_ATTEMPTS;
-    attempt++
-  ) {
+async function fetchOpenMeteoWithRetry(url: URL): Promise<Response> {
+  for (let attempt = 1; attempt <= MAX_OPEN_METEO_ATTEMPTS; attempt++) {
     let response: Response;
 
     try {
@@ -203,8 +256,6 @@ async function fetchOpenMeteoWithRetry(
     });
 
     // A daily quota cannot be fixed by retrying.
-    // Switch to the fallback provider immediately.
-
     if (response.status === 429) {
       throw new Error("OPEN_METEO_RATE_LIMIT");
     }
@@ -213,9 +264,7 @@ async function fetchOpenMeteoWithRetry(
       !RETRYABLE_STATUS_CODES.includes(response.status) ||
       attempt === MAX_OPEN_METEO_ATTEMPTS
     ) {
-      throw new Error(
-        `OPEN_METEO_HTTP_${response.status}`,
-      );
+      throw new Error(`OPEN_METEO_HTTP_${response.status}`);
     }
 
     await sleep(1000 * attempt);
@@ -229,83 +278,32 @@ async function fetchOpenMeteoWithRetry(
 // ============================================
 
 async function getWeatherFromOpenMeteo(
-  city: string,
+  location: OpenMeteoLocation,
 ): Promise<WeatherResult> {
-  console.log(`OPEN-METEO: geocoding ${city}`);
+  const forecastUrl = new URL("https://api.open-meteo.com/v1/forecast");
 
-  const geocodingUrl = new URL(
-    "https://geocoding-api.open-meteo.com/v1/search",
-  );
+  forecastUrl.searchParams.set("latitude", String(location.latitude));
 
-  geocodingUrl.searchParams.set("name", city);
-  geocodingUrl.searchParams.set("count", "1");
-  geocodingUrl.searchParams.set("language", "en");
-  geocodingUrl.searchParams.set("format", "json");
-
-  const geocodingResponse = await fetch(geocodingUrl, {
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT),
-  });
-
-  if (!geocodingResponse.ok) {
-    if (geocodingResponse.status === 429) {
-      throw new Error("OPEN_METEO_RATE_LIMIT");
-    }
-
-    throw new Error(
-      `GEOCODING_HTTP_${geocodingResponse.status}`,
-    );
-  }
-
-  const geocodingData = geocodingResponseSchema.parse(
-    await geocodingResponse.json(),
-  );
-
-  const location = geocodingData.results?.[0];
-
-  if (!location) {
-    throw new Error("CITY_NOT_FOUND");
-  }
-
-  console.log(
-    `OPEN-METEO: location found ${location.name}, ${location.country}`,
-  );
-
-  const forecastUrl = new URL(
-    "https://api.open-meteo.com/v1/forecast",
-  );
-
-  forecastUrl.searchParams.set(
-    "latitude",
-    String(location.latitude),
-  );
-
-  forecastUrl.searchParams.set(
-    "longitude",
-    String(location.longitude),
-  );
+  forecastUrl.searchParams.set("longitude", String(location.longitude));
 
   forecastUrl.searchParams.set(
     "current",
     "temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code",
   );
 
-  const forecastResponse = await fetchOpenMeteoWithRetry(
-    forecastUrl,
-  );
+  const response = await fetchOpenMeteoWithRetry(forecastUrl);
 
-  const forecastData = forecastResponseSchema.parse(
-    await forecastResponse.json(),
-  );
+  const data = forecastResponseSchema.parse(await response.json());
 
   console.log("OPEN-METEO: weather received successfully");
 
   return {
     city: location.name,
     country: location.country,
-    temperature: forecastData.current.temperature_2m,
-    humidity: forecastData.current.relative_humidity_2m,
-    windSpeed: forecastData.current.wind_speed_10m,
-    weatherCode: forecastData.current.weather_code,
+    temperature: data.current.temperature_2m,
+    humidity: data.current.relative_humidity_2m,
+    windSpeed: data.current.wind_speed_10m,
+    weatherCode: data.current.weather_code,
   };
 }
 
@@ -315,6 +313,7 @@ async function getWeatherFromOpenMeteo(
 
 async function getWeatherFromWeatherApi(
   city: string,
+  location?: OpenMeteoLocation,
 ): Promise<WeatherResult> {
   const apiKey = process.env.WEATHERAPI_KEY;
 
@@ -324,12 +323,16 @@ async function getWeatherFromWeatherApi(
 
   console.log(`WEATHERAPI: requesting weather for ${city}`);
 
-  const weatherUrl = new URL(
-    "https://api.weatherapi.com/v1/current.json",
-  );
+  const weatherUrl = new URL("https://api.weatherapi.com/v1/current.json");
 
   weatherUrl.searchParams.set("key", apiKey);
-  weatherUrl.searchParams.set("q", city);
+
+  // IMPORTANT:
+  // Prefer coordinates obtained from Open-Meteo.
+  // This avoids city-name lookup problems in WeatherAPI.
+  const query = location ? `${location.latitude},${location.longitude}` : city;
+
+  weatherUrl.searchParams.set("q", query);
   weatherUrl.searchParams.set("aqi", "no");
 
   const response = await fetch(weatherUrl, {
@@ -340,7 +343,6 @@ async function getWeatherFromWeatherApi(
 
   if (!response.ok) {
     // WeatherAPI error code 1006 means location not found.
-
     if (
       typeof responseData === "object" &&
       responseData !== null &&
@@ -355,13 +357,13 @@ async function getWeatherFromWeatherApi(
 
     console.error("WEATHERAPI HTTP error:", {
       status: response.status,
+      responseData,
     });
 
     throw new Error(`WEATHERAPI_HTTP_${response.status}`);
   }
 
-  const parsedData =
-    weatherApiResponseSchema.safeParse(responseData);
+  const parsedData = weatherApiResponseSchema.safeParse(responseData);
 
   if (!parsedData.success) {
     console.error(
@@ -375,7 +377,7 @@ async function getWeatherFromWeatherApi(
   const data = parsedData.data;
 
   console.log(
-    `WEATHERAPI: weather received for ${data.location.name}`,
+    `WEATHERAPI: weather received for ${data.location.name}, ${data.location.country}`,
   );
 
   return {
@@ -384,9 +386,7 @@ async function getWeatherFromWeatherApi(
     temperature: data.current.temp_c,
     humidity: data.current.humidity,
     windSpeed: data.current.wind_kph,
-    weatherCode: normalizeWeatherCode(
-      data.current.condition.code,
-    ),
+    weatherCode: normalizeWeatherCode(data.current.condition.code),
   };
 }
 
@@ -394,9 +394,7 @@ async function getWeatherFromWeatherApi(
 // MAIN WEATHER SERVICE
 // ============================================
 
-export async function getWeatherByCity(
-  city: string,
-): Promise<WeatherResult> {
+export async function getWeatherByCity(city: string): Promise<WeatherResult> {
   const normalizedCity = city.trim();
 
   if (!normalizedCity) {
@@ -416,37 +414,45 @@ export async function getWeatherByCity(
       if (cachedWeather) {
         console.log(`Cache HIT: ${cacheKey}`);
 
-        const weather = JSON.parse(
-          cachedWeather,
-        ) as WeatherResult;
+        const weather = JSON.parse(cachedWeather) as WeatherResult;
 
-        await addWeatherHistoryJob(
-          weather,
-          new Date().toISOString(),
-        );
+        await addWeatherHistoryJob(weather, new Date().toISOString());
 
         return weather;
       }
 
       console.log(`Cache MISS: ${cacheKey}`);
     } catch (error) {
-      console.warn(
-        "Redis GET failed. Continuing without cache:",
-        error,
-      );
+      console.warn("Redis GET failed. Continuing without cache:", error);
     }
   } else {
     console.warn("Redis unavailable. Skipping cache.");
   }
 
   // ------------------------------------------
-  // 2. PRIMARY PROVIDER: OPEN-METEO
+  // 2. GEOCODING
+  // ------------------------------------------
+
+  let location: OpenMeteoLocation | undefined;
+
+  try {
+    location = await getOpenMeteoLocation(normalizedCity);
+  } catch (error) {
+    console.warn("OPEN-METEO geocoding failed:", error);
+  }
+
+  // ------------------------------------------
+  // 3. PRIMARY PROVIDER: OPEN-METEO
   // ------------------------------------------
 
   let weather: WeatherResult;
 
   try {
-    weather = await getWeatherFromOpenMeteo(normalizedCity);
+    if (!location) {
+      throw new Error("OPEN_METEO_LOCATION_UNAVAILABLE");
+    }
+
+    weather = await getWeatherFromOpenMeteo(location);
 
     console.log("Weather provider: Open-Meteo");
   } catch (primaryError) {
@@ -456,13 +462,11 @@ export async function getWeatherByCity(
     );
 
     // ----------------------------------------
-    // 3. FALLBACK PROVIDER: WEATHERAPI
+    // 4. FALLBACK PROVIDER: WEATHERAPI
     // ----------------------------------------
 
     try {
-      weather = await getWeatherFromWeatherApi(
-        normalizedCity,
-      );
+      weather = await getWeatherFromWeatherApi(normalizedCity, location);
 
       console.log("Weather provider: WeatherAPI");
     } catch (fallbackError) {
@@ -485,18 +489,14 @@ export async function getWeatherByCity(
   }
 
   // ------------------------------------------
-  // 4. SAVE SUCCESSFUL RESULT TO REDIS
+  // 5. SAVE SUCCESSFUL RESULT TO REDIS
   // ------------------------------------------
 
   if (redisClient.isReady) {
     try {
-      await redisClient.set(
-        cacheKey,
-        JSON.stringify(weather),
-        {
-          EX: CACHE_TTL,
-        },
-      );
+      await redisClient.set(cacheKey, JSON.stringify(weather), {
+        EX: CACHE_TTL,
+      });
 
       console.log(`Cache SET: ${cacheKey}`);
     } catch (error) {
@@ -505,16 +505,13 @@ export async function getWeatherByCity(
   }
 
   // ------------------------------------------
-  // 5. SAVE SEARCH HISTORY THROUGH BULLMQ
+  // 6. SAVE SEARCH HISTORY THROUGH BULLMQ
   // ------------------------------------------
 
-  await addWeatherHistoryJob(
-    weather,
-    new Date().toISOString(),
-  );
+  await addWeatherHistoryJob(weather, new Date().toISOString());
 
   // ------------------------------------------
-  // 6. RETURN WEATHER
+  // 7. RETURN WEATHER
   // ------------------------------------------
 
   return weather;
