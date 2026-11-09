@@ -8,12 +8,113 @@ import redisClient from "../config/redis.js";
 import { weatherQueue } from "../queues/weather.queue.js";
 import type { WeatherHistoryJobData } from "../queues/weather.queue.js";
 
-// HTTP-статуси, для яких є сенс повторити запит.
+// HTTP-статуси, для яких повторюємо запит.
 const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
 
-// Час життя кешу — 10 хвилин.
+// Налаштування.
 const CACHE_TTL = 600;
+const REQUEST_TIMEOUT = 10_000;
+const MAX_ATTEMPTS = 3;
 
+// Затримка між повторними спробами.
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Визначення затримки перед наступним запитом.
+function getRetryDelay(retryAfter: string | null, attempt: number): number {
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.min(seconds * 1000, 10_000);
+    }
+
+    const date = Date.parse(retryAfter);
+
+    if (Number.isFinite(date)) {
+      return Math.min(Math.max(0, date - Date.now()), 10_000);
+    }
+  }
+
+  return 1000 * 2 ** (attempt - 1);
+}
+
+// Універсальний fetch із тайм-аутом та повторними спробами.
+async function fetchWithRetry(
+  url: URL,
+  serviceName: string,
+  maxAttempts = MAX_ATTEMPTS,
+): Promise<Response> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`${serviceName}: request attempt ${attempt}/${maxAttempts}`);
+
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (response.ok) {
+        console.log(`${serviceName}: request successful`);
+        return response;
+      }
+
+      const responseBody = await response.text();
+
+      console.error(`${serviceName}: HTTP error`, {
+        status: response.status,
+        statusText: response.statusText,
+        responseBody: responseBody.slice(0, 1000),
+        attempt,
+      });
+
+      if (
+        !RETRYABLE_STATUS_CODES.includes(response.status) ||
+        attempt === maxAttempts
+      ) {
+        throw new Error(`${serviceName}_API_ERROR_HTTP_${response.status}`);
+      }
+
+      const delay = getRetryDelay(response.headers.get("retry-after"), attempt);
+
+      console.warn(`${serviceName}: retry in ${delay}ms`);
+
+      await sleep(delay);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("_API_ERROR_HTTP_")
+      ) {
+        throw error;
+      }
+
+      const isLastAttempt = attempt === maxAttempts;
+
+      console.error(`${serviceName}: network error`, {
+        message: error instanceof Error ? error.message : String(error),
+        name: error instanceof Error ? error.name : "UnknownError",
+        attempt,
+      });
+
+      if (isLastAttempt) {
+        throw new Error(`${serviceName}_API_UNAVAILABLE`, { cause: error });
+      }
+
+      const delay = 1000 * 2 ** (attempt - 1);
+
+      console.warn(`${serviceName}: retry in ${delay}ms`);
+
+      await sleep(delay);
+    }
+  }
+
+  throw new Error(`${serviceName}_API_UNAVAILABLE`);
+}
+
+// Додавання задачі збереження історії через BullMQ.
 async function addWeatherHistoryJob(
   weather: Omit<WeatherHistoryJobData, "searchedAt">,
   searchedAt: string,
@@ -30,66 +131,21 @@ async function addWeatherHistoryJob(
   }
 }
 
-// Повторний запит із поступовим збільшенням паузи.
+// Основна функція отримання погоди.
+export async function getWeatherByCity(city: string) {
+  const normalizedCity = city.trim();
 
-async function fetchWithRetry(url: URL, maxAttempts = 3): Promise<Response> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const response = await fetch(url);
-
-    if (response.ok) {
-      return response;
-    }
-
-    const responseBody = await response.clone().text();
-    const retryAfter = response.headers.get("retry-after");
-
-    console.error("Open-Meteo Forecast API error:", {
-      status: response.status,
-      statusText: response.statusText,
-      responseBody,
-      retryAfter,
-      attempt,
-      url: url.toString(),
-    });
-
-    // Не повторюємо запити для помилок, які не можна виправити повтором.
-    if (
-      !RETRYABLE_STATUS_CODES.includes(response.status) ||
-      attempt === maxAttempts
-    ) {
-      throw new Error(
-        `FORECAST_API_ERROR (HTTP ${response.status}): ${responseBody.slice(0, 1000)}`,
-      );
-    }
-
-    // Визначаємо час наступної спроби.
-    const retryAfterMs = retryAfter
-      ? Number.isFinite(Number(retryAfter))
-        ? Number(retryAfter) * 1000
-        : Math.max(0, Date.parse(retryAfter) - Date.now())
-      : NaN;
-
-    const delay = Number.isFinite(retryAfterMs)
-      ? retryAfterMs
-      : 1000 * 2 ** (attempt - 1);
-
-    console.warn(`Forecast retry in ${delay}ms (${attempt}/${maxAttempts})`);
-
-    await new Promise((resolve) => setTimeout(resolve, delay));
+  if (!normalizedCity) {
+    throw new Error("CITY_NOT_FOUND");
   }
 
-  throw new Error("FORECAST_API_ERROR");
-}
+  const cacheKey = `weather:${normalizedCity.toLowerCase()}`;
 
-export async function getWeatherByCity(city: string) {
-  // 1. Створюємо ключ кешу.
-  const cacheKey = `weather:${city.trim().toLowerCase()}`;
-
-  // 2. Перевіряємо Redis.
-  // Перевіряємо кеш, якщо Redis готовий.
+  // 1. Перевіряємо Redis.
   if (redisClient.isReady) {
     try {
       const cachedWeather = await redisClient.get(cacheKey);
+
       if (cachedWeather) {
         console.log(`Cache HIT: ${cacheKey}`);
 
@@ -108,25 +164,22 @@ export async function getWeatherByCity(city: string) {
       console.warn("Redis GET failed. Continuing without cache:", error);
     }
   } else {
-    console.warn("Redis is unavailable. Skipping cache.");
+    console.warn("Redis unavailable. Skipping cache.");
   }
 
-  // 3. Якщо кешу немає — звертаємося до Open-Meteo.
-
+  // 2. Отримуємо координати міста.
   const geocodingUrl = new URL(
     "https://geocoding-api.open-meteo.com/v1/search",
   );
 
-  geocodingUrl.searchParams.set("name", city);
+  geocodingUrl.searchParams.set("name", normalizedCity);
   geocodingUrl.searchParams.set("count", "1");
   geocodingUrl.searchParams.set("language", "en");
   geocodingUrl.searchParams.set("format", "json");
 
-  const geocodingResponse = await fetch(geocodingUrl);
+  console.log(`Geocoding city: ${normalizedCity}`);
 
-  if (!geocodingResponse.ok) {
-    throw new Error("GEOCODING_API_ERROR");
-  }
+  const geocodingResponse = await fetchWithRetry(geocodingUrl, "GEOCODING");
 
   const geocodingData = geocodingResponseSchema.parse(
     await geocodingResponse.json(),
@@ -138,22 +191,27 @@ export async function getWeatherByCity(city: string) {
     throw new Error("CITY_NOT_FOUND");
   }
 
+  console.log(`Location found: ${location.name}, ${location.country}`);
+
+  // 3. Отримуємо прогноз погоди.
   const forecastUrl = new URL("https://api.open-meteo.com/v1/forecast");
 
   forecastUrl.searchParams.set("latitude", String(location.latitude));
+
   forecastUrl.searchParams.set("longitude", String(location.longitude));
+
   forecastUrl.searchParams.set(
     "current",
     "temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code",
   );
 
-  const forecastResponse = await fetchWithRetry(forecastUrl);
+  const forecastResponse = await fetchWithRetry(forecastUrl, "FORECAST");
 
   const forecastData = forecastResponseSchema.parse(
     await forecastResponse.json(),
   );
 
-  // 4. Формуємо результат.
+  // 4. Формуємо погодні дані.
   const weather = {
     city: location.name,
     country: location.country,
@@ -163,8 +221,7 @@ export async function getWeatherByCity(city: string) {
     weatherCode: forecastData.current.weather_code,
   };
 
-  // 5. Зберігаємо результат у Redis на 10 хвилин.
-  // Зберігаємо погоду в кеші, якщо Redis доступний.
+  // 5. Зберігаємо погоду в Redis на 10 хвилин.
   if (redisClient.isReady) {
     try {
       await redisClient.set(cacheKey, JSON.stringify(weather), {
@@ -176,9 +233,12 @@ export async function getWeatherByCity(city: string) {
       console.warn("Redis SET failed:", error);
     }
   }
-  // 6. Додаємо задачу збереження історії.
+
+  // 6. Передаємо збереження історії у BullMQ.
   await addWeatherHistoryJob(weather, new Date().toISOString());
 
-  // 7. Повертаємо погодні дані.
+  // 7. Повертаємо результат.
+  console.log(`Weather successfully retrieved: ${location.name}`);
+
   return weather;
 }
