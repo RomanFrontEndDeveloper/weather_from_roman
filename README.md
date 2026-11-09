@@ -981,3 +981,15 @@ WeatherPulse is a deployed full-stack application. Further development can focus
 ## License
 
 This project is developed for educational and portfolio purposes.
+
+
+## Uptime Monitoring
+
+The backend API is monitored using UptimeRobot to help prevent the Render service from sleeping due to inactivity.
+
+- Monitoring service: UptimeRobot
+- Monitor type: HTTP(s)
+- Endpoint: `/api/health`
+- Monitoring interval: 5 minutes
+
+The health endpoint returns HTTP 200 when the API is running.

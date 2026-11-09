@@ -5,7 +5,12 @@ import { prisma } from "../prisma.js";
 
 const router = Router();
 
-// Перевірка доступності API.
+// ============================================
+// 1. LIVENESS CHECK
+// ============================================
+// Перевіряє, чи працює Express API.
+// Використовується UptimeRobot та Render.
+
 router.get("/health", (_req, res) => {
   res.status(200).json({
     status: "ok",
@@ -13,7 +18,37 @@ router.get("/health", (_req, res) => {
   });
 });
 
+// ============================================
+// 2. READINESS CHECK
+// ============================================
+// Перевіряє, чи готовий сервер обробляти запити.
+// Наразі перевіряємо підключення PostgreSQL.
+
+router.get("/health/ready", async (_req, res) => {
+  let database = false;
+
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    database = true;
+  } catch (error) {
+    console.error("Database health check failed:", error);
+  }
+
+  const isReady = database;
+
+  res.status(isReady ? 200 : 503).json({
+    status: isReady ? "ready" : "not ready",
+    checks: {
+      database,
+    },
+  });
+});
+
+// ============================================
+// 3. GET WEATHER
+// ============================================
 // Отримання поточної погоди за назвою міста.
+
 router.get("/weather", async (req, res) => {
   const city = req.query.city;
 
@@ -44,7 +79,11 @@ router.get("/weather", async (req, res) => {
   }
 });
 
-// Отримання історії пошуку погоди.
+// ============================================
+// 4. GET SEARCH HISTORY
+// ============================================
+// Отримання історії пошуку погоди з PostgreSQL.
+
 router.get("/history", async (_req, res) => {
   try {
     const history = await prisma.weatherSearch.findMany({
@@ -70,7 +109,11 @@ router.get("/history", async (_req, res) => {
   }
 });
 
+// ============================================
+// 5. DELETE HISTORY RECORD
+// ============================================
 // Видалення запису з історії пошуку.
+
 router.delete("/history/:id", async (req, res) => {
   const id = Number(req.params.id);
 
@@ -107,5 +150,9 @@ router.delete("/history/:id", async (req, res) => {
     });
   }
 });
+
+// ============================================
+// EXPORT ROUTER
+// ============================================
 
 export default router;
