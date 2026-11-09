@@ -1,3 +1,6 @@
+
+import { z } from "zod";
+
 import {
   geocodingResponseSchema,
   forecastResponseSchema,
@@ -8,113 +11,135 @@ import redisClient from "../config/redis.js";
 import { weatherQueue } from "../queues/weather.queue.js";
 import type { WeatherHistoryJobData } from "../queues/weather.queue.js";
 
-// HTTP-статуси, для яких повторюємо запит.
-const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
+// ============================================
+// CONFIGURATION
+// ============================================
 
-// Налаштування.
 const CACHE_TTL = 600;
 const REQUEST_TIMEOUT = 10_000;
-const MAX_ATTEMPTS = 3;
+const MAX_OPEN_METEO_ATTEMPTS = 2;
 
-// Затримка між повторними спробами.
+const RETRYABLE_STATUS_CODES = [500, 502, 503, 504];
+
+// ============================================
+// TYPES
+// ============================================
+
+type WeatherResult = {
+  city: string;
+  country: string;
+  temperature: number;
+  humidity: number;
+  windSpeed: number;
+  weatherCode: number;
+};
+
+// ============================================
+// WEATHERAPI RESPONSE VALIDATION
+// ============================================
+
+const weatherApiResponseSchema = z.object({
+  location: z.object({
+    name: z.string(),
+    country: z.string(),
+  }),
+
+  current: z.object({
+    temp_c: z.number(),
+    humidity: z.number(),
+    wind_kph: z.number(),
+
+    condition: z.object({
+      text: z.string(),
+      code: z.number(),
+    }),
+  }),
+});
+
+// ============================================
+// HELPERS
+// ============================================
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Визначення затримки перед наступним запитом.
-function getRetryDelay(retryAfter: string | null, attempt: number): number {
-  if (retryAfter) {
-    const seconds = Number(retryAfter);
+// ============================================
+// WEATHER CODE NORMALIZATION
+// ============================================
 
-    if (Number.isFinite(seconds) && seconds >= 0) {
-      return Math.min(seconds * 1000, 10_000);
-    }
+// WeatherAPI uses its own condition codes.
+// We convert them into WMO codes used by the frontend.
 
-    const date = Date.parse(retryAfter);
+const WEATHERAPI_TO_WMO: Record<number, number> = {
+  1000: 0,
+  1003: 2,
+  1006: 3,
+  1009: 3,
 
-    if (Number.isFinite(date)) {
-      return Math.min(Math.max(0, date - Date.now()), 10_000);
-    }
-  }
+  1030: 45,
+  1063: 61,
+  1066: 71,
+  1069: 66,
+  1072: 56,
+  1087: 95,
 
-  return 1000 * 2 ** (attempt - 1);
+  1114: 75,
+  1117: 75,
+  1135: 45,
+  1147: 48,
+
+  1150: 51,
+  1153: 51,
+  1168: 56,
+  1171: 57,
+
+  1180: 61,
+  1183: 61,
+  1186: 63,
+  1189: 63,
+  1192: 65,
+  1195: 65,
+
+  1198: 66,
+  1201: 67,
+  1204: 66,
+  1207: 67,
+
+  1210: 71,
+  1213: 71,
+  1216: 73,
+  1219: 73,
+  1222: 75,
+  1225: 75,
+
+  1237: 77,
+
+  1240: 80,
+  1243: 81,
+  1246: 82,
+
+  1249: 85,
+  1252: 86,
+  1255: 85,
+  1258: 86,
+  1261: 85,
+  1264: 86,
+
+  1273: 95,
+  1276: 95,
+  1279: 95,
+  1282: 95,
+};
+
+function normalizeWeatherCode(code: number): number {
+  return WEATHERAPI_TO_WMO[code] ?? 3;
 }
 
-// Універсальний fetch із тайм-аутом та повторними спробами.
-async function fetchWithRetry(
-  url: URL,
-  serviceName: string,
-  maxAttempts = MAX_ATTEMPTS,
-): Promise<Response> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      console.log(`${serviceName}: request attempt ${attempt}/${maxAttempts}`);
+// ============================================
+// WEATHER HISTORY QUEUE
+// ============================================
 
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
-        headers: {
-          Accept: "application/json",
-        },
-      });
-
-      if (response.ok) {
-        console.log(`${serviceName}: request successful`);
-        return response;
-      }
-
-      const responseBody = await response.text();
-
-      console.error(`${serviceName}: HTTP error`, {
-        status: response.status,
-        statusText: response.statusText,
-        responseBody: responseBody.slice(0, 1000),
-        attempt,
-      });
-
-      if (
-        !RETRYABLE_STATUS_CODES.includes(response.status) ||
-        attempt === maxAttempts
-      ) {
-        throw new Error(`${serviceName}_API_ERROR_HTTP_${response.status}`);
-      }
-
-      const delay = getRetryDelay(response.headers.get("retry-after"), attempt);
-
-      console.warn(`${serviceName}: retry in ${delay}ms`);
-
-      await sleep(delay);
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.includes("_API_ERROR_HTTP_")
-      ) {
-        throw error;
-      }
-
-      const isLastAttempt = attempt === maxAttempts;
-
-      console.error(`${serviceName}: network error`, {
-        message: error instanceof Error ? error.message : String(error),
-        name: error instanceof Error ? error.name : "UnknownError",
-        attempt,
-      });
-
-      if (isLastAttempt) {
-        throw new Error(`${serviceName}_API_UNAVAILABLE`, { cause: error });
-      }
-
-      const delay = 1000 * 2 ** (attempt - 1);
-
-      console.warn(`${serviceName}: retry in ${delay}ms`);
-
-      await sleep(delay);
-    }
-  }
-
-  throw new Error(`${serviceName}_API_UNAVAILABLE`);
-}
-
-// Додавання задачі збереження історії через BullMQ.
 async function addWeatherHistoryJob(
   weather: Omit<WeatherHistoryJobData, "searchedAt">,
   searchedAt: string,
@@ -131,55 +156,105 @@ async function addWeatherHistoryJob(
   }
 }
 
-// Основна функція отримання погоди.
-export async function getWeatherByCity(city: string) {
-  const normalizedCity = city.trim();
+// ============================================
+// OPEN-METEO RETRY
+// ============================================
 
-  if (!normalizedCity) {
-    throw new Error("CITY_NOT_FOUND");
-  }
+async function fetchOpenMeteoWithRetry(
+  url: URL,
+): Promise<Response> {
+  for (
+    let attempt = 1;
+    attempt <= MAX_OPEN_METEO_ATTEMPTS;
+    attempt++
+  ) {
+    let response: Response;
 
-  const cacheKey = `weather:${normalizedCity.toLowerCase()}`;
-
-  // 1. Перевіряємо Redis.
-  if (redisClient.isReady) {
     try {
-      const cachedWeather = await redisClient.get(cacheKey);
+      console.log(
+        `OPEN-METEO: request attempt ${attempt}/${MAX_OPEN_METEO_ATTEMPTS}`,
+      );
 
-      if (cachedWeather) {
-        console.log(`Cache HIT: ${cacheKey}`);
-
-        const weather = JSON.parse(cachedWeather) as Omit<
-          WeatherHistoryJobData,
-          "searchedAt"
-        >;
-
-        await addWeatherHistoryJob(weather, new Date().toISOString());
-
-        return weather;
+      response = await fetch(url, {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+      });
+    } catch (error) {
+      if (attempt === MAX_OPEN_METEO_ATTEMPTS) {
+        throw error;
       }
 
-      console.log(`Cache MISS: ${cacheKey}`);
-    } catch (error) {
-      console.warn("Redis GET failed. Continuing without cache:", error);
+      console.warn("OPEN-METEO network error. Retrying:", error);
+
+      await sleep(1000 * attempt);
+      continue;
     }
-  } else {
-    console.warn("Redis unavailable. Skipping cache.");
+
+    if (response.ok) {
+      console.log("OPEN-METEO: request successful");
+      return response;
+    }
+
+    const responseBody = await response.text();
+
+    console.error("OPEN-METEO HTTP error:", {
+      status: response.status,
+      responseBody: responseBody.slice(0, 500),
+      attempt,
+    });
+
+    // A daily quota cannot be fixed by retrying.
+    // Switch to the fallback provider immediately.
+
+    if (response.status === 429) {
+      throw new Error("OPEN_METEO_RATE_LIMIT");
+    }
+
+    if (
+      !RETRYABLE_STATUS_CODES.includes(response.status) ||
+      attempt === MAX_OPEN_METEO_ATTEMPTS
+    ) {
+      throw new Error(
+        `OPEN_METEO_HTTP_${response.status}`,
+      );
+    }
+
+    await sleep(1000 * attempt);
   }
 
-  // 2. Отримуємо координати міста.
+  throw new Error("OPEN_METEO_REQUEST_FAILED");
+}
+
+// ============================================
+// PRIMARY PROVIDER: OPEN-METEO
+// ============================================
+
+async function getWeatherFromOpenMeteo(
+  city: string,
+): Promise<WeatherResult> {
+  console.log(`OPEN-METEO: geocoding ${city}`);
+
   const geocodingUrl = new URL(
     "https://geocoding-api.open-meteo.com/v1/search",
   );
 
-  geocodingUrl.searchParams.set("name", normalizedCity);
+  geocodingUrl.searchParams.set("name", city);
   geocodingUrl.searchParams.set("count", "1");
   geocodingUrl.searchParams.set("language", "en");
   geocodingUrl.searchParams.set("format", "json");
 
-  console.log(`Geocoding city: ${normalizedCity}`);
+  const geocodingResponse = await fetch(geocodingUrl, {
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+  });
 
-  const geocodingResponse = await fetchWithRetry(geocodingUrl, "GEOCODING");
+  if (!geocodingResponse.ok) {
+    if (geocodingResponse.status === 429) {
+      throw new Error("OPEN_METEO_RATE_LIMIT");
+    }
+
+    throw new Error(
+      `GEOCODING_HTTP_${geocodingResponse.status}`,
+    );
+  }
 
   const geocodingData = geocodingResponseSchema.parse(
     await geocodingResponse.json(),
@@ -191,28 +266,40 @@ export async function getWeatherByCity(city: string) {
     throw new Error("CITY_NOT_FOUND");
   }
 
-  console.log(`Location found: ${location.name}, ${location.country}`);
+  console.log(
+    `OPEN-METEO: location found ${location.name}, ${location.country}`,
+  );
 
-  // 3. Отримуємо прогноз погоди.
-  const forecastUrl = new URL("https://api.open-meteo.com/v1/forecast");
+  const forecastUrl = new URL(
+    "https://api.open-meteo.com/v1/forecast",
+  );
 
-  forecastUrl.searchParams.set("latitude", String(location.latitude));
+  forecastUrl.searchParams.set(
+    "latitude",
+    String(location.latitude),
+  );
 
-  forecastUrl.searchParams.set("longitude", String(location.longitude));
+  forecastUrl.searchParams.set(
+    "longitude",
+    String(location.longitude),
+  );
 
   forecastUrl.searchParams.set(
     "current",
     "temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code",
   );
 
-  const forecastResponse = await fetchWithRetry(forecastUrl, "FORECAST");
+  const forecastResponse = await fetchOpenMeteoWithRetry(
+    forecastUrl,
+  );
 
   const forecastData = forecastResponseSchema.parse(
     await forecastResponse.json(),
   );
 
-  // 4. Формуємо погодні дані.
-  const weather = {
+  console.log("OPEN-METEO: weather received successfully");
+
+  return {
     city: location.name,
     country: location.country,
     temperature: forecastData.current.temperature_2m,
@@ -220,13 +307,196 @@ export async function getWeatherByCity(city: string) {
     windSpeed: forecastData.current.wind_speed_10m,
     weatherCode: forecastData.current.weather_code,
   };
+}
 
-  // 5. Зберігаємо погоду в Redis на 10 хвилин.
+// ============================================
+// FALLBACK PROVIDER: WEATHERAPI.COM
+// ============================================
+
+async function getWeatherFromWeatherApi(
+  city: string,
+): Promise<WeatherResult> {
+  const apiKey = process.env.WEATHERAPI_KEY;
+
+  if (!apiKey) {
+    throw new Error("WEATHERAPI_KEY_MISSING");
+  }
+
+  console.log(`WEATHERAPI: requesting weather for ${city}`);
+
+  const weatherUrl = new URL(
+    "https://api.weatherapi.com/v1/current.json",
+  );
+
+  weatherUrl.searchParams.set("key", apiKey);
+  weatherUrl.searchParams.set("q", city);
+  weatherUrl.searchParams.set("aqi", "no");
+
+  const response = await fetch(weatherUrl, {
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+  });
+
+  const responseData: unknown = await response.json();
+
+  if (!response.ok) {
+    // WeatherAPI error code 1006 means location not found.
+
+    if (
+      typeof responseData === "object" &&
+      responseData !== null &&
+      "error" in responseData &&
+      typeof responseData.error === "object" &&
+      responseData.error !== null &&
+      "code" in responseData.error &&
+      responseData.error.code === 1006
+    ) {
+      throw new Error("CITY_NOT_FOUND");
+    }
+
+    console.error("WEATHERAPI HTTP error:", {
+      status: response.status,
+    });
+
+    throw new Error(`WEATHERAPI_HTTP_${response.status}`);
+  }
+
+  const parsedData =
+    weatherApiResponseSchema.safeParse(responseData);
+
+  if (!parsedData.success) {
+    console.error(
+      "WEATHERAPI response validation failed:",
+      parsedData.error.flatten(),
+    );
+
+    throw new Error("WEATHERAPI_INVALID_RESPONSE");
+  }
+
+  const data = parsedData.data;
+
+  console.log(
+    `WEATHERAPI: weather received for ${data.location.name}`,
+  );
+
+  return {
+    city: data.location.name,
+    country: data.location.country,
+    temperature: data.current.temp_c,
+    humidity: data.current.humidity,
+    windSpeed: data.current.wind_kph,
+    weatherCode: normalizeWeatherCode(
+      data.current.condition.code,
+    ),
+  };
+}
+
+// ============================================
+// MAIN WEATHER SERVICE
+// ============================================
+
+export async function getWeatherByCity(
+  city: string,
+): Promise<WeatherResult> {
+  const normalizedCity = city.trim();
+
+  if (!normalizedCity) {
+    throw new Error("CITY_NOT_FOUND");
+  }
+
+  const cacheKey = `weather:${normalizedCity.toLowerCase()}`;
+
+  // ------------------------------------------
+  // 1. REDIS CACHE
+  // ------------------------------------------
+
   if (redisClient.isReady) {
     try {
-      await redisClient.set(cacheKey, JSON.stringify(weather), {
-        EX: CACHE_TTL,
+      const cachedWeather = await redisClient.get(cacheKey);
+
+      if (cachedWeather) {
+        console.log(`Cache HIT: ${cacheKey}`);
+
+        const weather = JSON.parse(
+          cachedWeather,
+        ) as WeatherResult;
+
+        await addWeatherHistoryJob(
+          weather,
+          new Date().toISOString(),
+        );
+
+        return weather;
+      }
+
+      console.log(`Cache MISS: ${cacheKey}`);
+    } catch (error) {
+      console.warn(
+        "Redis GET failed. Continuing without cache:",
+        error,
+      );
+    }
+  } else {
+    console.warn("Redis unavailable. Skipping cache.");
+  }
+
+  // ------------------------------------------
+  // 2. PRIMARY PROVIDER: OPEN-METEO
+  // ------------------------------------------
+
+  let weather: WeatherResult;
+
+  try {
+    weather = await getWeatherFromOpenMeteo(normalizedCity);
+
+    console.log("Weather provider: Open-Meteo");
+  } catch (primaryError) {
+    console.warn(
+      "Open-Meteo failed. Switching to fallback provider:",
+      primaryError,
+    );
+
+    // ----------------------------------------
+    // 3. FALLBACK PROVIDER: WEATHERAPI
+    // ----------------------------------------
+
+    try {
+      weather = await getWeatherFromWeatherApi(
+        normalizedCity,
+      );
+
+      console.log("Weather provider: WeatherAPI");
+    } catch (fallbackError) {
+      console.error("Both weather providers failed:", {
+        primaryError,
+        fallbackError,
       });
+
+      if (
+        primaryError instanceof Error &&
+        fallbackError instanceof Error &&
+        primaryError.message === "CITY_NOT_FOUND" &&
+        fallbackError.message === "CITY_NOT_FOUND"
+      ) {
+        throw new Error("CITY_NOT_FOUND");
+      }
+
+      throw new Error("WEATHER_PROVIDERS_UNAVAILABLE");
+    }
+  }
+
+  // ------------------------------------------
+  // 4. SAVE SUCCESSFUL RESULT TO REDIS
+  // ------------------------------------------
+
+  if (redisClient.isReady) {
+    try {
+      await redisClient.set(
+        cacheKey,
+        JSON.stringify(weather),
+        {
+          EX: CACHE_TTL,
+        },
+      );
 
       console.log(`Cache SET: ${cacheKey}`);
     } catch (error) {
@@ -234,11 +504,18 @@ export async function getWeatherByCity(city: string) {
     }
   }
 
-  // 6. Передаємо збереження історії у BullMQ.
-  await addWeatherHistoryJob(weather, new Date().toISOString());
+  // ------------------------------------------
+  // 5. SAVE SEARCH HISTORY THROUGH BULLMQ
+  // ------------------------------------------
 
-  // 7. Повертаємо результат.
-  console.log(`Weather successfully retrieved: ${location.name}`);
+  await addWeatherHistoryJob(
+    weather,
+    new Date().toISOString(),
+  );
+
+  // ------------------------------------------
+  // 6. RETURN WEATHER
+  // ------------------------------------------
 
   return weather;
 }
