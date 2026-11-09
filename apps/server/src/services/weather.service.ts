@@ -9,7 +9,7 @@ import { weatherQueue } from "../queues/weather.queue.js";
 import type { WeatherHistoryJobData } from "../queues/weather.queue.js";
 
 // HTTP-статуси, для яких є сенс повторити запит.
-const RETRYABLE_STATUS_CODES = [500, 502, 503, 504];
+const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
 
 // Час життя кешу — 10 хвилин.
 const CACHE_TTL = 600;
@@ -36,27 +36,33 @@ async function fetchWithRetry(url: URL, maxAttempts = 3): Promise<Response> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const response = await fetch(url);
 
-    if (response.ok || !RETRYABLE_STATUS_CODES.includes(response.status)) {
+    if (response.ok) {
       return response;
     }
 
-    // Читаємо відповідь API для діагностики.
     const responseBody = await response.clone().text();
     const retryAfter = response.headers.get("retry-after");
 
-    console.error("Weather API request failed:", {
+    console.error("Open-Meteo Forecast API error:", {
       status: response.status,
       statusText: response.statusText,
       responseBody,
       retryAfter,
       attempt,
+      url: url.toString(),
     });
 
-    if (attempt === maxAttempts) {
-      return response;
+    // Не повторюємо запити для помилок, які не можна виправити повтором.
+    if (
+      !RETRYABLE_STATUS_CODES.includes(response.status) ||
+      attempt === maxAttempts
+    ) {
+      throw new Error(
+        `FORECAST_API_ERROR (HTTP ${response.status}): ${responseBody.slice(0, 1000)}`,
+      );
     }
 
-    // Якщо API вказав час очікування — використовуємо його.
+    // Визначаємо час наступної спроби.
     const retryAfterMs = retryAfter
       ? Number.isFinite(Number(retryAfter))
         ? Number(retryAfter) * 1000
@@ -67,7 +73,7 @@ async function fetchWithRetry(url: URL, maxAttempts = 3): Promise<Response> {
       ? retryAfterMs
       : 1000 * 2 ** (attempt - 1);
 
-    console.warn(`Weather API retry in ${delay}ms (${attempt}/${maxAttempts})`);
+    console.warn(`Forecast retry in ${delay}ms (${attempt}/${maxAttempts})`);
 
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
@@ -142,10 +148,6 @@ export async function getWeatherByCity(city: string) {
   );
 
   const forecastResponse = await fetchWithRetry(forecastUrl);
-
-  if (!forecastResponse.ok) {
-    throw new Error("FORECAST_API_ERROR");
-  }
 
   const forecastData = forecastResponseSchema.parse(
     await forecastResponse.json(),
