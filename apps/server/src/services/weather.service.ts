@@ -9,7 +9,7 @@ import { weatherQueue } from "../queues/weather.queue.js";
 import type { WeatherHistoryJobData } from "../queues/weather.queue.js";
 
 // HTTP-статуси, для яких є сенс повторити запит.
-const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
+const RETRYABLE_STATUS_CODES = [500, 502, 503, 504];
 
 // Час життя кешу — 10 хвилин.
 const CACHE_TTL = 600;
