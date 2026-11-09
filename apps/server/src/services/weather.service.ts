@@ -31,24 +31,43 @@ async function addWeatherHistoryJob(
 }
 
 // Повторний запит із поступовим збільшенням паузи.
+
 async function fetchWithRetry(url: URL, maxAttempts = 3): Promise<Response> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const response = await fetch(url);
 
-    if (
-      response.ok ||
-      !RETRYABLE_STATUS_CODES.includes(response.status) ||
-      attempt === maxAttempts
-    ) {
+    if (response.ok || !RETRYABLE_STATUS_CODES.includes(response.status)) {
       return response;
     }
 
-    const delay = 1000 * 2 ** (attempt - 1);
+    // Читаємо відповідь API для діагностики.
+    const responseBody = await response.clone().text();
+    const retryAfter = response.headers.get("retry-after");
 
-    console.warn(
-      `Weather API returned ${response.status}. ` +
-        `Retrying in ${delay}ms (${attempt}/${maxAttempts})`,
-    );
+    console.error("Weather API request failed:", {
+      status: response.status,
+      statusText: response.statusText,
+      responseBody,
+      retryAfter,
+      attempt,
+    });
+
+    if (attempt === maxAttempts) {
+      return response;
+    }
+
+    // Якщо API вказав час очікування — використовуємо його.
+    const retryAfterMs = retryAfter
+      ? Number.isFinite(Number(retryAfter))
+        ? Number(retryAfter) * 1000
+        : Math.max(0, Date.parse(retryAfter) - Date.now())
+      : NaN;
+
+    const delay = Number.isFinite(retryAfterMs)
+      ? retryAfterMs
+      : 1000 * 2 ** (attempt - 1);
+
+    console.warn(`Weather API retry in ${delay}ms (${attempt}/${maxAttempts})`);
 
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
